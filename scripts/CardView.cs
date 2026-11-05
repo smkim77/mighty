@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Godot;
 
 namespace MightyGame;
@@ -109,7 +109,7 @@ public partial class CardView : Button
         if (_cardData.Suit == Suit.Joker)
         {
             DrawString(font, rect.Position + new Vector2(8, 22), "JOKER", HorizontalAlignment.Left, -1, 13, textCol);
-            DrawString(font, rect.Position + new Vector2(0, h * 0.58f), "🃏", HorizontalAlignment.Center, w, _compactMode ? 24 : 32, textCol);
+            DrawString(font, rect.Position + new Vector2(0, h * 0.58f), "★", HorizontalAlignment.Center, w, _compactMode ? 24 : 32, textCol);
             DrawString(font, rect.Position + new Vector2(0, h - 10), "조커", HorizontalAlignment.Center, w, 13, textCol);
         }
         else

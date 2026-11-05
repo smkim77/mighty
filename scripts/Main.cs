@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -88,6 +88,15 @@ public partial class Main : Control
 
     private static void SetupKoreanFont()
     {
+        if (ResourceLoader.Exists("res://fonts/NanumSquareRoundB.ttf"))
+        {
+            var bundledFont = GD.Load<FontFile>("res://fonts/NanumSquareRoundB.ttf");
+            if (bundledFont != null)
+            {
+                ThemeDB.FallbackFont = bundledFont;
+                return;
+            }
+        }
         var sysFont = new SystemFont
         {
             FontNames = new[]
@@ -394,7 +403,7 @@ public partial class Main : Control
                 "2. 경매(공약): 최소 13점부터 기루다(으뜸패) 문양과 목표 점수를 선언합니다. 최고 점수를 부른 사람이 '주공(대통령)'이 됩니다.\n\n" +
                 "3. 바닥패 교환 & 프렌드 지정: 주공은 바닥패 3장을 가져와 13장 중 3장을 버리고, 함께 팀(여당)이 될 '프렌드' 카드를 지정합니다.\n" +
                 "   - 프렌드로 지정된 카드를 가진 플레이어는 해당 카드를 내기 전까지 정체가 숨겨집니다.\n\n" +
-                "4. 특수 카드 서열: 마이티(♠A, 단 스페이드가 기루다면 ♦A) > 조커(🃏) > 기루다(A~2) > 선공 문양(A~2)\n" +
+                "4. 특수 카드 서열: 마이티(♠A, 단 스페이드가 기루다면 ♦A) > 조커(★) > 기루다(A~2) > 선공 문양(A~2)\n" +
                 "   - 초구(1라운드)에는 기루다 선공이 불가하며, 초구와 막구(10라운드)에는 조커의 효력이 없습니다.\n" +
                 "   - 조커 콜(♣3, 클로버가 기루다면 ♠3)로 선공하면 조커 보유자는 반드시 조커를 내야 합니다.\n\n" +
                 "5. 승리 조건: 점수 카드(A, K, Q, J, 10 - 총 20점)를 여당(주공+프렌드)이 공약 점수 이상 획득하면 여당 승리, 못 미치면 야당(3명)이 승리합니다!"
@@ -544,7 +553,7 @@ public partial class Main : Control
 
         var title = new Label
         {
-            Text = "👑 경매 (공약 선언)",
+            Text = "★ 경매 (공약 선언)",
             HorizontalAlignment = HorizontalAlignment.Center
         };
         title.AddThemeFontSizeOverride("font_size", 20);
@@ -717,7 +726,7 @@ public partial class Main : Control
         var list = new List<FriendSpec>
         {
             new() { Type = FriendType.Card, CardId = mCard.Id, Label = $"마이티 ({MightyRules.GetCardShortName(mCard)}) 프렌드" },
-            new() { Type = FriendType.Card, CardId = "joker", Label = "조커 (🃏) 프렌드" }
+            new() { Type = FriendType.Card, CardId = "joker", Label = "조커 (★) 프렌드" }
         };
 
         if (_trumpSuit != Suit.None)
@@ -740,7 +749,7 @@ public partial class Main : Control
 
         var title = new Label
         {
-            Text = "👑 주공 당선! 바닥패 3장 버리기 & 프렌드 지정",
+            Text = "★ 주공 당선! 바닥패 3장 버리기 & 프렌드 지정",
             HorizontalAlignment = HorizontalAlignment.Center
         };
         title.AddThemeFontSizeOverride("font_size", 19);
@@ -956,7 +965,7 @@ public partial class Main : Control
 
         var t = new Label
         {
-            Text = "🃏 조커 선공: 요청할 문양을 선택하세요",
+            Text = "★ 조커 선공: 요청할 문양을 선택하세요",
             HorizontalAlignment = HorizontalAlignment.Center
         };
         t.AddThemeFontSizeOverride("font_size", 18);
@@ -1054,7 +1063,7 @@ public partial class Main : Control
             {
                 _friendPlayerIdx = playerIdx;
                 _friendRevealed = true;
-                _logLabel.Text = $"🤝 {PlayerNames[playerIdx]}님이 프렌드 카드({MightyRules.GetCardShortName(card)})를 내어 여당(프렌드)임이 밝혀졌습니다!";
+                _logLabel.Text = $"♦ {PlayerNames[playerIdx]}님이 프렌드 카드({MightyRules.GetCardShortName(card)})를 내어 여당(프렌드)임이 밝혀졌습니다!";
             }
         }
 
@@ -1076,7 +1085,7 @@ public partial class Main : Control
             if (winnerIdx != _declarerIdx)
                 _friendPlayerIdx = winnerIdx;
             _friendRevealed = true;
-            _logLabel.Text = $"🤝 초구 승리자 {PlayerNames[winnerIdx]}님이 프렌드(여당)가 되었습니다!";
+            _logLabel.Text = $"♦ 초구 승리자 {PlayerNames[winnerIdx]}님이 프렌드(여당)가 되었습니다!";
         }
 
         int ptsWon = 0;
@@ -1186,8 +1195,8 @@ public partial class Main : Control
         for (int i = 0; i < 5; i++)
         {
             string roleTag = "야당";
-            if (i == _declarerIdx) roleTag = "주공👑";
-            else if (i == _friendPlayerIdx) roleTag = "프렌드🤝";
+            if (i == _declarerIdx) roleTag = "주공★";
+            else if (i == _friendPlayerIdx) roleTag = "프렌드♦";
             string diffStr = scoreChanges[i] >= 0 ? $"+{scoreChanges[i]}" : scoreChanges[i].ToString();
 
             var row = new Label
@@ -1310,8 +1319,8 @@ public partial class Main : Control
             string roleTxt = "경매 중";
             if (_declarerIdx != -1)
             {
-                if (i == _declarerIdx) roleTxt = "👑 주공";
-                else if (_friendRevealed && i == _friendPlayerIdx) roleTxt = "🤝 프렌드";
+                if (i == _declarerIdx) roleTxt = "★ 주공";
+                else if (_friendRevealed && i == _friendPlayerIdx) roleTxt = "♦ 프렌드";
                 else if (_friendRevealed) roleTxt = "🛡️ 야당";
                 else roleTxt = "❓ 미상";
             }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -58,7 +58,7 @@ public static class MightyRules
         Suit.Diamond => "♦",
         Suit.Heart => "♥",
         Suit.Club => "♣",
-        Suit.Joker => "🃏",
+        Suit.Joker => "★",
         _ => ""
     };
 
@@ -86,7 +86,7 @@ public static class MightyRules
     public static string GetCardShortName(CardData? card)
     {
         if (card == null) return "";
-        if (card.Suit == Suit.Joker) return "🃏조커";
+        if (card.Suit == Suit.Joker) return "★조커";
         return $"{GetSuitSymbol(card.Suit)}{GetRankString(card.Rank)}";
     }
 
