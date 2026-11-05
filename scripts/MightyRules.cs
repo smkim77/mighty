@@ -55,7 +55,7 @@ public static class MightyRules
     {
         Suit.None => "노기루",
         Suit.Spade => "♠",
-        Suit.Diamond => "♦",
+        Suit.Diamond => "◆",
         Suit.Heart => "♥",
         Suit.Club => "♣",
         Suit.Joker => "★",
@@ -66,7 +66,7 @@ public static class MightyRules
     {
         Suit.None => "노기루",
         Suit.Spade => "스페이드 ♠",
-        Suit.Diamond => "다이아몬드 ♦",
+        Suit.Diamond => "다이아몬드 ◆",
         Suit.Heart => "하트 ♥",
         Suit.Club => "클로버 ♣",
         Suit.Joker => "조커",

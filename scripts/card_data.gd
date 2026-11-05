@@ -10,7 +10,7 @@ const SUIT_JOKER := 4
 const SUIT_SYMBOLS := {
 	SUIT_NONE: "노기루",
 	SUIT_SPADE: "♠",
-	SUIT_DIAMOND: "♦",
+	SUIT_DIAMOND: "◆",
 	SUIT_HEART: "♥",
 	SUIT_CLUB: "♣",
 	SUIT_JOKER: "★"
@@ -19,7 +19,7 @@ const SUIT_SYMBOLS := {
 const SUIT_NAMES := {
 	SUIT_NONE: "노기루",
 	SUIT_SPADE: "스페이드 ♠",
-	SUIT_DIAMOND: "다이아몬드 ♦",
+	SUIT_DIAMOND: "다이아몬드 ◆",
 	SUIT_HEART: "하트 ♥",
 	SUIT_CLUB: "클로버 ♣",
 	SUIT_JOKER: "조커 ★"

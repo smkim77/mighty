@@ -36,6 +36,15 @@ func _on_pressed() -> void:
 	if is_legal_play:
 		card_clicked.emit(card_data)
 
+func _draw_diamond(center: Vector2, rx: float, ry: float, col: Color) -> void:
+	var pts := PackedVector2Array([
+		Vector2(center.x, center.y - ry),
+		Vector2(center.x + rx, center.y),
+		Vector2(center.x, center.y + ry),
+		Vector2(center.x - rx, center.y)
+	])
+	draw_colored_polygon(pts, col)
+
 func _draw() -> void:
 	if card_data.is_empty():
 		return
@@ -94,8 +103,12 @@ func _draw() -> void:
 		var r_str := Rules.rank_str(rank)
 		var s_str: String = str(Rules.SUIT_SYMBOLS[suit])
 		draw_string(font, rect.position + Vector2(8, 22), r_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 17 if not compact_mode else 14, text_col)
-		draw_string(font, rect.position + Vector2(8, 40), s_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 16 if not compact_mode else 13, text_col)
-		draw_string(font, rect.position + Vector2(0, h * 0.64), s_str, HORIZONTAL_ALIGNMENT_CENTER, w, 34 if not compact_mode else 26, text_col)
+		if suit == Rules.SUIT_DIAMOND:
+			_draw_diamond(rect.position + Vector2(14, 34), 4.2 if not compact_mode else 3.5, 5.8 if not compact_mode else 4.8, text_col)
+			_draw_diamond(rect.position + Vector2(w * 0.5, h * 0.54), 10.5 if not compact_mode else 8.2, 14.2 if not compact_mode else 11.0, text_col)
+		else:
+			draw_string(font, rect.position + Vector2(8, 40), s_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 16 if not compact_mode else 13, text_col)
+			draw_string(font, rect.position + Vector2(0, h * 0.64), s_str, HORIZONTAL_ALIGNMENT_CENTER, w, 34 if not compact_mode else 26, text_col)
 
 	if Rules.is_mighty(card_data, trump_suit):
 		var badge_rect := Rect2(rect.position + Vector2(w - 26, 5), Vector2(21, 18))

@@ -48,6 +48,18 @@ public partial class CardView : Button
             CardClicked?.Invoke(_cardData);
     }
 
+    private void DrawDiamond(Vector2 center, float rx, float ry, Color col)
+    {
+        Vector2[] pts =
+        {
+            new(center.X, center.Y - ry),
+            new(center.X + rx, center.Y),
+            new(center.X, center.Y + ry),
+            new(center.X - rx, center.Y)
+        };
+        DrawColoredPolygon(pts, col);
+    }
+
     public override void _Draw()
     {
         if (_cardData == null) return;
@@ -109,7 +121,7 @@ public partial class CardView : Button
         if (_cardData.Suit == Suit.Joker)
         {
             DrawString(font, rect.Position + new Vector2(8, 22), "JOKER", HorizontalAlignment.Left, -1, 13, textCol);
-            DrawString(font, rect.Position + new Vector2(0, h * 0.58f), "★", HorizontalAlignment.Center, w, _compactMode ? 24 : 32, textCol);
+            DrawString(font, rect.Position + new Vector2(0, h * 0.56f), "★", HorizontalAlignment.Center, w, _compactMode ? 22 : 30, textCol);
             DrawString(font, rect.Position + new Vector2(0, h - 10), "조커", HorizontalAlignment.Center, w, 13, textCol);
         }
         else
@@ -117,8 +129,16 @@ public partial class CardView : Button
             string rStr = MightyRules.GetRankString(_cardData.Rank);
             string sStr = MightyRules.GetSuitSymbol(_cardData.Suit);
             DrawString(font, rect.Position + new Vector2(8, 22), rStr, HorizontalAlignment.Left, -1, _compactMode ? 14 : 17, textCol);
-            DrawString(font, rect.Position + new Vector2(8, 40), sStr, HorizontalAlignment.Left, -1, _compactMode ? 13 : 16, textCol);
-            DrawString(font, rect.Position + new Vector2(0, h * 0.64f), sStr, HorizontalAlignment.Center, w, _compactMode ? 26 : 34, textCol);
+            if (_cardData.Suit == Suit.Diamond)
+            {
+                DrawDiamond(rect.Position + new Vector2(14, 34), _compactMode ? 3.5f : 4.2f, _compactMode ? 4.8f : 5.8f, textCol);
+                DrawDiamond(rect.Position + new Vector2(w * 0.5f, h * 0.54f), _compactMode ? 8.2f : 10.5f, _compactMode ? 11.0f : 14.2f, textCol);
+            }
+            else
+            {
+                DrawString(font, rect.Position + new Vector2(8, 40), sStr, HorizontalAlignment.Left, -1, _compactMode ? 13 : 16, textCol);
+                DrawString(font, rect.Position + new Vector2(0, h * 0.64f), sStr, HorizontalAlignment.Center, w, _compactMode ? 26 : 34, textCol);
+            }
         }
 
         if (MightyRules.IsMighty(_cardData, _trumpSuit))
