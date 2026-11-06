@@ -1227,7 +1227,7 @@ public partial class Main : Control
             }
         }
 
-        RenderTrickSlot(_trickPlays.Count - 1, playerIdx, card);
+        RenderAllTrickSlots();
         _turnPlayer = (_turnPlayer + 1) % 5;
         _ = ProcessTrickTurnAsync(gen);
     }
@@ -1411,6 +1411,15 @@ public partial class Main : Control
         }
     }
 
+    private void RenderAllTrickSlots()
+    {
+        for (int idx = 0; idx < _trickPlays.Count; idx++)
+        {
+            var tp = _trickPlays[idx];
+            RenderTrickSlot(idx, tp.PlayerIndex, tp.Card);
+        }
+    }
+
     private void RenderTrickSlot(int slotIdx, int playerIdx, CardData card)
     {
         if (slotIdx < 0 || slotIdx >= _trickSlots.Count) return;
@@ -1418,19 +1427,68 @@ public partial class Main : Control
         foreach (Node c in slot.GetChildren())
             c.QueueFree();
 
+        string roleTxt = "? 미상";
+        Color roleCol = ColorUnknownRole;
+        var tagBg = new Color(0.07f, 0.16f, 0.12f, 0.92f);
+        var tagBorder = new Color(0.28f, 0.52f, 0.38f);
+        int tagBw = 1;
+
+        if (playerIdx == _declarerIdx)
+        {
+            roleTxt = "★ 여당[주공]";
+            roleCol = ColorRulingMain;
+            tagBg = new Color(0.26f, 0.16f, 0.05f, 0.96f);
+            tagBorder = ColorRulingMain;
+            tagBw = 2;
+        }
+        else if (_friendRevealed && playerIdx == _friendPlayerIdx)
+        {
+            roleTxt = "★ 여당[프렌드]";
+            roleCol = ColorRulingFriend;
+            tagBg = new Color(0.24f, 0.14f, 0.06f, 0.96f);
+            tagBorder = ColorRulingFriend;
+            tagBw = 2;
+        }
+        else if (_friendRevealed)
+        {
+            roleTxt = "◆ 야당";
+            roleCol = ColorOpposition;
+            tagBg = new Color(0.05f, 0.14f, 0.23f, 0.92f);
+            tagBorder = ColorOpposition;
+            tagBw = 1;
+        }
+
+        var headerBox = new PanelContainer();
+        headerBox.AddThemeStyleboxOverride("panel", MakePanelStyle(tagBg, tagBorder, 7, tagBw));
+        slot.AddChild(headerBox);
+
+        var headerVb = new VBoxContainer();
+        headerVb.AddThemeConstantOverride("separation", 1);
+        headerBox.AddChild(headerVb);
+
+        string shortName = PlayerNames[playerIdx].Replace(" (플레이어)", "");
         var who = new Label
         {
-            Text = $"{slotIdx + 1}. {PlayerNames[playerIdx]}",
+            Text = $"{slotIdx + 1}. {shortName}",
             HorizontalAlignment = HorizontalAlignment.Center
         };
-        who.AddThemeFontSizeOverride("font_size", 13);
+        who.AddThemeFontSizeOverride("font_size", 12);
         who.AddThemeColorOverride("font_color", PlayerColors[playerIdx]);
-        slot.AddChild(who);
+        headerVb.AddChild(who);
+
+        var roleLbl = new Label
+        {
+            Text = roleTxt,
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
+        roleLbl.AddThemeFontSizeOverride("font_size", 11);
+        roleLbl.AddThemeColorOverride("font_color", roleCol);
+        headerVb.AddChild(roleLbl);
 
         var cv = new CardView();
         slot.AddChild(cv);
         cv.Setup(card, _trumpSuit, true, false);
-        cv.SetLegal(false);
+        cv.SetLegal(false, false);
     }
 
     private void HighlightActiveSeat(int activeIdx)

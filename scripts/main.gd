@@ -1130,7 +1130,7 @@ func _execute_card_play(gen: int, player_idx: int, card: Dictionary, declare_jok
 				Rules.card_short_name(card)
 			], "#C7F2D9", true)
 
-	_render_trick_slot(trick_plays.size() - 1, player_idx, card)
+	_render_all_trick_slots()
 	turn_player = (turn_player + 1) % 5
 	_process_trick_turn(gen)
 
@@ -1145,6 +1145,7 @@ func _finish_trick(gen: int) -> void:
 		if winner_idx != declarer_idx:
 			friend_player_idx = winner_idx
 		friend_revealed = true
+		_render_all_trick_slots()
 		_set_rich_text(log_label, "[프렌드 공개] 초구 승리자 %s님이 프렌드(여당)가 되었습니다!" % PLAYER_NAMES[winner_idx], "#C7F2D9", true)
 
 	var pts_won := 0
@@ -1286,6 +1287,11 @@ func _clear_trick_slots() -> void:
 		for c in slot.get_children():
 			c.queue_free()
 
+func _render_all_trick_slots() -> void:
+	for idx in range(trick_plays.size()):
+		var tp: Dictionary = trick_plays[idx]
+		_render_trick_slot(idx, int(tp["player"]), tp["card"])
+
 func _render_trick_slot(slot_idx: int, player_idx: int, card: Dictionary) -> void:
 	if slot_idx < 0 or slot_idx >= trick_slots.size():
 		return
@@ -1293,12 +1299,52 @@ func _render_trick_slot(slot_idx: int, player_idx: int, card: Dictionary) -> voi
 	for c in slot.get_children():
 		c.queue_free()
 
+	var role_txt := "? 미상"
+	var role_col := COLOR_UNKNOWN_ROLE
+	var tag_bg := Color(0.07, 0.16, 0.12, 0.92)
+	var tag_border := Color(0.28, 0.52, 0.38)
+	var tag_bw := 1
+	if player_idx == declarer_idx:
+		role_txt = "★ 여당[주공]"
+		role_col = COLOR_RULING_MAIN
+		tag_bg = Color(0.26, 0.16, 0.05, 0.96)
+		tag_border = COLOR_RULING_MAIN
+		tag_bw = 2
+	elif friend_revealed and player_idx == friend_player_idx:
+		role_txt = "★ 여당[프렌드]"
+		role_col = COLOR_RULING_FRIEND
+		tag_bg = Color(0.24, 0.14, 0.06, 0.96)
+		tag_border = COLOR_RULING_FRIEND
+		tag_bw = 2
+	elif friend_revealed:
+		role_txt = "◆ 야당"
+		role_col = COLOR_OPPOSITION
+		tag_bg = Color(0.05, 0.14, 0.23, 0.92)
+		tag_border = COLOR_OPPOSITION
+		tag_bw = 1
+
+	var header_box := PanelContainer.new()
+	header_box.add_theme_stylebox_override("panel", _make_panel_style(tag_bg, tag_border, 7, tag_bw))
+	slot.add_child(header_box)
+
+	var header_vb := VBoxContainer.new()
+	header_vb.add_theme_constant_override("separation", 1)
+	header_box.add_child(header_vb)
+
 	var who := Label.new()
-	who.text = "%d. %s" % [slot_idx + 1, PLAYER_NAMES[player_idx]]
+	var short_name: String = PLAYER_NAMES[player_idx].replace(" (플레이어)", "")
+	who.text = "%d. %s" % [slot_idx + 1, short_name]
 	who.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	who.add_theme_font_size_override("font_size", 13)
+	who.add_theme_font_size_override("font_size", 12)
 	who.add_theme_color_override("font_color", PLAYER_COLORS[player_idx])
-	slot.add_child(who)
+	header_vb.add_child(who)
+
+	var role_lbl := Label.new()
+	role_lbl.text = role_txt
+	role_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	role_lbl.add_theme_font_size_override("font_size", 11)
+	role_lbl.add_theme_color_override("font_color", role_col)
+	header_vb.add_child(role_lbl)
 
 	var cv := Button.new()
 	cv.set_script(CardViewScript)
