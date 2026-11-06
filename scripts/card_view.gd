@@ -7,7 +7,8 @@ const Rules = preload("res://scripts/card_data.gd")
 var card_data: Dictionary = {}
 var trump_suit: int = Rules.SUIT_NONE
 var is_selected_for_discard: bool = false
-var is_legal_play: bool = true
+var is_legal_play: bool = false
+var is_dimmed: bool = false
 var compact_mode: bool = false
 var mini_mode: bool = false
 
@@ -24,16 +25,18 @@ func setup(data: Dictionary, p_trump_suit: int = Rules.SUIT_NONE, p_compact: boo
 	else:
 		custom_minimum_size = Vector2(86, 124)
 	flat = true
-	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	disabled = true
+	mouse_default_cursor_shape = Control.CURSOR_ARROW
 	pressed.connect(_on_pressed)
 	mouse_entered.connect(func() -> void: queue_redraw())
 	mouse_exited.connect(func() -> void: queue_redraw())
 	queue_redraw()
 
-func set_legal(legal: bool) -> void:
+func set_legal(legal: bool, dim_when_illegal: bool = false) -> void:
 	is_legal_play = legal
+	is_dimmed = (not legal) and dim_when_illegal
 	disabled = not legal
-	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if legal else Control.CURSOR_FORBIDDEN
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if legal else Control.CURSOR_ARROW
 	queue_redraw()
 
 func set_discard_selected(sel: bool) -> void:
@@ -70,26 +73,19 @@ func _draw() -> void:
 	var bg_col := Color(0.99, 0.985, 0.96)
 	if is_selected_for_discard:
 		bg_col = Color(1.0, 0.93, 0.72)
-	elif not is_legal_play and not mini_mode:
-		bg_col = Color(0.88, 0.89, 0.88)
+	elif is_dimmed and not mini_mode:
+		bg_col = Color(0.84, 0.86, 0.85)
 
 	draw_rect(rect, bg_col, true)
 
 	var border_col := Color(0.22, 0.26, 0.30)
 	var border_w := 1.5 if mini_mode else 2.0
-	if Rules.is_mighty(card_data, trump_suit):
-		border_col = Color(0.92, 0.68, 0.08)
-		border_w = 2.5 if mini_mode else 3.5
-	elif Rules.is_joker(card_data):
-		border_col = Color(0.58, 0.24, 0.88)
-		border_w = 2.0 if mini_mode else 3.0
-	elif trump_suit != Rules.SUIT_NONE and int(card_data["suit"]) == trump_suit:
-		border_col = Color(0.14, 0.65, 0.38)
-		border_w = 2.0 if mini_mode else 2.5
-
 	if is_selected_for_discard:
 		border_col = Color(0.95, 0.32, 0.18)
 		border_w = 3.5
+	elif is_legal_play and not mini_mode:
+		border_col = Color(0.14, 0.75, 0.38)
+		border_w = 3.2
 
 	draw_rect(rect, border_col, false, border_w)
 
@@ -103,8 +99,8 @@ func _draw() -> void:
 	elif suit == Rules.SUIT_JOKER:
 		text_col = Color(0.48, 0.16, 0.78)
 
-	if not is_legal_play and not mini_mode:
-		text_col = text_col.darkened(0.22)
+	if is_dimmed and not mini_mode:
+		text_col = text_col.darkened(0.25)
 
 	if mini_mode:
 		if suit == Rules.SUIT_JOKER:

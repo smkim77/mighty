@@ -1621,16 +1621,16 @@ public partial class Main : Control
 
             if (_phase == Phase.KittyExchange && _declarerIdx == 0)
             {
-                cv.SetLegal(true);
+                cv.SetLegal(true, false);
                 cv.SetDiscardSelected(_discardSelectedIds.Contains(card.Id));
             }
             else if (_phase == Phase.Playing && _turnPlayer == 0 && _waitingForHuman)
             {
-                cv.SetLegal(legalIds.Contains(card.Id));
+                cv.SetLegal(legalIds.Contains(card.Id), true);
             }
             else
             {
-                cv.SetLegal(false);
+                cv.SetLegal(false, false);
             }
 
             cv.CardClicked += OnHumanCardClicked;

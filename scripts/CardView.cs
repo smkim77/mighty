@@ -10,7 +10,8 @@ public partial class CardView : Button
     private CardData? _cardData;
     private Suit _trumpSuit = Suit.None;
     private bool _isSelectedForDiscard;
-    private bool _isLegalPlay = true;
+    private bool _isLegalPlay;
+    private bool _isDimmed;
     private bool _compactMode;
     private bool _miniMode;
 
@@ -30,7 +31,8 @@ public partial class CardView : Button
             CustomMinimumSize = compact ? new Vector2(72, 102) : new Vector2(86, 124);
         }
         Flat = true;
-        MouseDefaultCursorShape = CursorShape.PointingHand;
+        Disabled = true;
+        MouseDefaultCursorShape = CursorShape.Arrow;
 
         Pressed += OnButtonPressed;
         MouseEntered += QueueRedraw;
@@ -38,11 +40,12 @@ public partial class CardView : Button
         QueueRedraw();
     }
 
-    public void SetLegal(bool legal)
+    public void SetLegal(bool legal, bool dimWhenIllegal = false)
     {
         _isLegalPlay = legal;
+        _isDimmed = !legal && dimWhenIllegal;
         Disabled = !legal;
-        MouseDefaultCursorShape = legal ? CursorShape.PointingHand : CursorShape.Forbidden;
+        MouseDefaultCursorShape = legal ? CursorShape.PointingHand : CursorShape.Arrow;
         QueueRedraw();
     }
 
@@ -85,33 +88,22 @@ public partial class CardView : Button
         var bgCol = new Color(0.99f, 0.985f, 0.96f);
         if (_isSelectedForDiscard)
             bgCol = new Color(1.0f, 0.93f, 0.72f);
-        else if (!_isLegalPlay && !_miniMode)
-            bgCol = new Color(0.88f, 0.89f, 0.88f);
+        else if (_isDimmed && !_miniMode)
+            bgCol = new Color(0.84f, 0.86f, 0.85f);
 
         DrawRect(rect, bgCol, true);
 
         var borderCol = new Color(0.22f, 0.26f, 0.30f);
         float borderW = _miniMode ? 1.5f : 2.0f;
-        if (MightyRules.IsMighty(_cardData, _trumpSuit))
-        {
-            borderCol = new Color(0.92f, 0.68f, 0.08f);
-            borderW = _miniMode ? 2.5f : 3.5f;
-        }
-        else if (MightyRules.IsJoker(_cardData))
-        {
-            borderCol = new Color(0.58f, 0.24f, 0.88f);
-            borderW = _miniMode ? 2.0f : 3.0f;
-        }
-        else if (_trumpSuit != Suit.None && _cardData.Suit == _trumpSuit)
-        {
-            borderCol = new Color(0.14f, 0.65f, 0.38f);
-            borderW = _miniMode ? 2.0f : 2.5f;
-        }
-
         if (_isSelectedForDiscard)
         {
             borderCol = new Color(0.95f, 0.32f, 0.18f);
             borderW = 3.5f;
+        }
+        else if (_isLegalPlay && !_miniMode)
+        {
+            borderCol = new Color(0.14f, 0.75f, 0.38f);
+            borderW = 3.2f;
         }
 
         DrawRect(rect, borderCol, false, borderW);
@@ -123,8 +115,8 @@ public partial class CardView : Button
         else if (_cardData.Suit == Suit.Joker)
             textCol = new Color(0.48f, 0.16f, 0.78f);
 
-        if (!_isLegalPlay && !_miniMode)
-            textCol = textCol.Darkened(0.22f);
+        if (_isDimmed && !_miniMode)
+            textCol = textCol.Darkened(0.25f);
 
         if (_miniMode)
         {
