@@ -1165,7 +1165,7 @@ func _show_human_kitty_modal(gen: int) -> void:
 
 	for slot_i in range(3):
 		if slot_i < discard_selected_ids.size():
-			var cid := discard_selected_ids[slot_i]
+			var cid: String = str(discard_selected_ids[slot_i])
 			var found_c: Dictionary = {}
 			for hc in hands[0]:
 				if str(hc["id"]) == cid:
