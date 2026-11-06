@@ -87,6 +87,11 @@ public partial class Main : Control
     private Label _contractInfoLabel = null!;
     private Label _teamScoreLabel = null!;
     private Button _playedCardsBtn = null!;
+    private Button _sfxToggleBtn = null!;
+    private bool _sfxEnabled = true;
+    private readonly Dictionary<string, AudioStreamWav> _sfxBank = new();
+    private readonly List<AudioStreamPlayer> _sfxPlayers = new();
+    private int _sfxPoolIdx;
     private Label _logLabel = null!;
     private readonly List<PanelContainer> _playerSeatPanels = new();
     private readonly List<Label> _playerRoleLabels = new();
@@ -108,8 +113,128 @@ public partial class Main : Control
     public override void _Ready()
     {
         SetupKoreanFont();
+        InitSfxSystem();
         BuildUi();
         StartNewRound();
+    }
+
+    private void InitSfxSystem()
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            var asp = new AudioStreamPlayer { VolumeDb = -3.0f };
+            AddChild(asp);
+            _sfxPlayers.Add(asp);
+        }
+
+        _sfxBank["deal"] = SynthWav(new[]
+        {
+            (420f, 880f, 0.042f, 0.35f, 0.55f),
+            (0f, 0f, 0.018f, 0f, 0f),
+            (460f, 940f, 0.042f, 0.35f, 0.55f),
+            (0f, 0f, 0.018f, 0f, 0f),
+            (500f, 1020f, 0.045f, 0.38f, 0.55f)
+        });
+        _sfxBank["card_play"] = SynthWav(new[] { (340f, 140f, 0.065f, 0.55f, 0.48f) });
+        _sfxBank["discard_click"] = SynthWav(new[] { (580f, 780f, 0.04f, 0.35f, 0.25f) });
+        _sfxBank["bid"] = SynthWav(new[]
+        {
+            (523.25f, 523.25f, 0.07f, 0.42f, 0f),
+            (659.25f, 659.25f, 0.11f, 0.46f, 0f)
+        });
+        _sfxBank["pass"] = SynthWav(new[] { (310f, 210f, 0.075f, 0.35f, 0.1f) });
+        _sfxBank["contract"] = SynthWav(new[]
+        {
+            (523.25f, 523.25f, 0.075f, 0.44f, 0f),
+            (659.25f, 659.25f, 0.075f, 0.44f, 0f),
+            (783.99f, 783.99f, 0.085f, 0.46f, 0f),
+            (1046.50f, 1046.50f, 0.16f, 0.50f, 0f)
+        });
+        _sfxBank["special_card"] = SynthWav(new[]
+        {
+            (587.33f, 587.33f, 0.065f, 0.48f, 0.08f),
+            (880.0f, 880.0f, 0.075f, 0.50f, 0.05f),
+            (1174.66f, 1174.66f, 0.15f, 0.54f, 0f)
+        });
+        _sfxBank["friend_reveal"] = SynthWav(new[]
+        {
+            (587.33f, 587.33f, 0.08f, 0.48f, 0f),
+            (783.99f, 783.99f, 0.08f, 0.50f, 0f),
+            (1174.66f, 1174.66f, 0.18f, 0.55f, 0f)
+        });
+        _sfxBank["trick_win"] = SynthWav(new[]
+        {
+            (659.25f, 659.25f, 0.065f, 0.40f, 0f),
+            (880.0f, 880.0f, 0.11f, 0.44f, 0f)
+        });
+        _sfxBank["round_win"] = SynthWav(new[]
+        {
+            (523.25f, 523.25f, 0.09f, 0.48f, 0f),
+            (659.25f, 659.25f, 0.09f, 0.48f, 0f),
+            (783.99f, 783.99f, 0.09f, 0.50f, 0f),
+            (1046.50f, 1046.50f, 0.26f, 0.55f, 0f)
+        });
+        _sfxBank["round_lose"] = SynthWav(new[]
+        {
+            (493.88f, 493.88f, 0.11f, 0.42f, 0f),
+            (440.0f, 440.0f, 0.11f, 0.42f, 0f),
+            (349.23f, 330.0f, 0.24f, 0.45f, 0f)
+        });
+    }
+
+    private static AudioStreamWav SynthWav((float f0, float f1, float dur, float vol, float noise)[] segments)
+    {
+        const int mixRate = 22050;
+        int totalSamples = segments.Sum(seg => (int)(seg.dur * mixRate));
+        byte[] pcm = new byte[totalSamples * 2];
+        int writePos = 0;
+        double phaseAcc = 0.0;
+        int lfsr = 0xACE1;
+
+        foreach (var (f0, f1, dur, vol, noiseMix) in segments)
+        {
+            int nSamples = (int)(dur * mixRate);
+            for (int s = 0; s < nSamples; s++)
+            {
+                float t = (float)s / Math.Max(1, nSamples);
+                float env = t < 0.08f ? (t / 0.08f) : MathF.Pow(1.0f - ((t - 0.08f) / 0.92f), 1.45f);
+                float freq = f0 + (f1 - f0) * t;
+                double tone = 0.0;
+                if (freq > 1.0f)
+                {
+                    phaseAcc += Math.Tau * freq / mixRate;
+                    tone = Math.Sin(phaseAcc) + 0.28 * Math.Sin(phaseAcc * 2.0);
+                }
+
+                int bit = ((lfsr >> 0) ^ (lfsr >> 2) ^ (lfsr >> 3) ^ (lfsr >> 5)) & 1;
+                lfsr = (lfsr >> 1) | (bit << 15);
+                float nVal = ((lfsr & 0xFFFF) / 32768.0f) - 1.0f;
+
+                double sample = (tone * (1.0f - noiseMix * 0.55f) + nVal * noiseMix) * vol * env;
+                int iSample = Math.Clamp((int)(sample * 28000.0), -32767, 32767);
+                pcm[writePos] = (byte)(iSample & 0xFF);
+                pcm[writePos + 1] = (byte)((iSample >> 8) & 0xFF);
+                writePos += 2;
+            }
+        }
+
+        return new AudioStreamWav
+        {
+            Format = AudioStreamWav.FormatEnum.Format16Bits,
+            MixRate = mixRate,
+            Stereo = false,
+            Data = pcm
+        };
+    }
+
+    private void PlaySfx(string key)
+    {
+        if (!_sfxEnabled || !_sfxBank.TryGetValue(key, out var stream) || _sfxPlayers.Count == 0)
+            return;
+        var p = _sfxPlayers[_sfxPoolIdx];
+        _sfxPoolIdx = (_sfxPoolIdx + 1) % _sfxPlayers.Count;
+        p.Stream = stream;
+        p.Play();
     }
 
     private static void SetupKoreanFont()
@@ -213,6 +338,16 @@ public partial class Main : Control
                 RefreshPlayedCardsModal();
         };
         topHbox.AddChild(_playedCardsBtn);
+
+        _sfxToggleBtn = new Button { Text = "♪ 효과음: ON" };
+        _sfxToggleBtn.Pressed += () =>
+        {
+            _sfxEnabled = !_sfxEnabled;
+            _sfxToggleBtn.Text = _sfxEnabled ? "♪ 효과음: ON" : "♪ 효과음: OFF";
+            if (_sfxEnabled)
+                PlaySfx("discard_click");
+        };
+        topHbox.AddChild(_sfxToggleBtn);
 
         var helpBtn = new Button { Text = "규칙 안내" };
         helpBtn.Pressed += () => _helpPanel.Visible = !_helpPanel.Visible;
@@ -608,7 +743,7 @@ public partial class Main : Control
 
         ClearTrickSlots();
         RefreshAllUi();
-        _logLabel.Text = "카드가 배분되었습니다. 경매를 시작합니다!";
+        PlaySfx("deal"); _logLabel.Text = "카드가 배분되었습니다. 경매를 시작합니다!";
         _ = ProcessBiddingTurnAsync(_roundGeneration);
     }
 

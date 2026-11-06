@@ -70,6 +70,11 @@ var top_status_label: Label
 var contract_info_label: RichTextLabel
 var team_score_label: Label
 var played_cards_btn: Button
+var sfx_toggle_btn: Button
+var sfx_enabled: bool = true
+var sfx_bank: Dictionary = {}
+var sfx_players: Array[AudioStreamPlayer] = []
+var sfx_pool_idx: int = 0
 var log_label: RichTextLabel
 var player_seat_panels: Array[PanelContainer] = []
 var player_name_labels: Array[Label] = []
@@ -94,8 +99,126 @@ func _ready() -> void:
 	suit_regex = RegEx.new()
 	suit_regex.compile("(스페이드\\s*♠|다이아몬드\\s*◆|하트\\s*♥|클로버\\s*♣|조커\\s*★|★조커|스페이드|다이아몬드|하트|클로버|[♠◆♥♣](?:10|[2-9JQKA])?)")
 	_setup_korean_font()
+	_init_sfx_system()
 	_build_ui()
 	start_new_round()
+
+func _init_sfx_system() -> void:
+	for i in range(4):
+		var asp := AudioStreamPlayer.new()
+		asp.volume_db = -3.0
+		add_child(asp)
+		sfx_players.append(asp)
+
+	sfx_bank["deal"] = _synth_wav([
+		{"f0": 420.0, "f1": 880.0, "dur": 0.042, "vol": 0.35, "noise": 0.55},
+		{"f0": 0.0, "f1": 0.0, "dur": 0.018, "vol": 0.0, "noise": 0.0},
+		{"f0": 460.0, "f1": 940.0, "dur": 0.042, "vol": 0.35, "noise": 0.55},
+		{"f0": 0.0, "f1": 0.0, "dur": 0.018, "vol": 0.0, "noise": 0.0},
+		{"f0": 500.0, "f1": 1020.0, "dur": 0.045, "vol": 0.38, "noise": 0.55}
+	])
+	sfx_bank["card_play"] = _synth_wav([
+		{"f0": 340.0, "f1": 140.0, "dur": 0.065, "vol": 0.55, "noise": 0.48}
+	])
+	sfx_bank["discard_click"] = _synth_wav([
+		{"f0": 580.0, "f1": 780.0, "dur": 0.04, "vol": 0.35, "noise": 0.25}
+	])
+	sfx_bank["bid"] = _synth_wav([
+		{"f0": 523.25, "f1": 523.25, "dur": 0.07, "vol": 0.42, "noise": 0.0},
+		{"f0": 659.25, "f1": 659.25, "dur": 0.11, "vol": 0.46, "noise": 0.0}
+	])
+	sfx_bank["pass"] = _synth_wav([
+		{"f0": 310.0, "f1": 210.0, "dur": 0.075, "vol": 0.35, "noise": 0.1}
+	])
+	sfx_bank["contract"] = _synth_wav([
+		{"f0": 523.25, "f1": 523.25, "dur": 0.075, "vol": 0.44, "noise": 0.0},
+		{"f0": 659.25, "f1": 659.25, "dur": 0.075, "vol": 0.44, "noise": 0.0},
+		{"f0": 783.99, "f1": 783.99, "dur": 0.085, "vol": 0.46, "noise": 0.0},
+		{"f0": 1046.50, "f1": 1046.50, "dur": 0.16, "vol": 0.50, "noise": 0.0}
+	])
+	sfx_bank["special_card"] = _synth_wav([
+		{"f0": 587.33, "f1": 587.33, "dur": 0.065, "vol": 0.48, "noise": 0.08},
+		{"f0": 880.0, "f1": 880.0, "dur": 0.075, "vol": 0.50, "noise": 0.05},
+		{"f0": 1174.66, "f1": 1174.66, "dur": 0.15, "vol": 0.54, "noise": 0.0}
+	])
+	sfx_bank["friend_reveal"] = _synth_wav([
+		{"f0": 587.33, "f1": 587.33, "dur": 0.08, "vol": 0.48, "noise": 0.0},
+		{"f0": 783.99, "f1": 783.99, "dur": 0.08, "vol": 0.50, "noise": 0.0},
+		{"f0": 1174.66, "f1": 1174.66, "dur": 0.18, "vol": 0.55, "noise": 0.0}
+	])
+	sfx_bank["trick_win"] = _synth_wav([
+		{"f0": 659.25, "f1": 659.25, "dur": 0.065, "vol": 0.40, "noise": 0.0},
+		{"f0": 880.0, "f1": 880.0, "dur": 0.11, "vol": 0.44, "noise": 0.0}
+	])
+	sfx_bank["round_win"] = _synth_wav([
+		{"f0": 523.25, "f1": 523.25, "dur": 0.09, "vol": 0.48, "noise": 0.0},
+		{"f0": 659.25, "f1": 659.25, "dur": 0.09, "vol": 0.48, "noise": 0.0},
+		{"f0": 783.99, "f1": 783.99, "dur": 0.09, "vol": 0.50, "noise": 0.0},
+		{"f0": 1046.50, "f1": 1046.50, "dur": 0.26, "vol": 0.55, "noise": 0.0}
+	])
+	sfx_bank["round_lose"] = _synth_wav([
+		{"f0": 493.88, "f1": 493.88, "dur": 0.11, "vol": 0.42, "noise": 0.0},
+		{"f0": 440.0, "f1": 440.0, "dur": 0.11, "vol": 0.42, "noise": 0.0},
+		{"f0": 349.23, "f1": 330.0, "dur": 0.24, "vol": 0.45, "noise": 0.0}
+	])
+
+func _synth_wav(segments: Array) -> AudioStreamWAV:
+	var mix_rate := 22050
+	var total_samples := 0
+	for seg in segments:
+		total_samples += int(float(seg["dur"]) * float(mix_rate))
+
+	var pcm := PackedByteArray()
+	pcm.resize(total_samples * 2)
+	var write_pos := 0
+	var phase_acc := 0.0
+	var lfsr := 0xACE1
+
+	for seg in segments:
+		var f0: float = float(seg["f0"])
+		var f1: float = float(seg["f1"])
+		var dur: float = float(seg["dur"])
+		var vol: float = float(seg["vol"])
+		var noise_mix: float = float(seg["noise"])
+		var n_samples := int(dur * float(mix_rate))
+		for s in range(n_samples):
+			var t := float(s) / float(maxi(1, n_samples))
+			var env := 1.0
+			if t < 0.08:
+				env = t / 0.08
+			else:
+				env = pow(1.0 - ((t - 0.08) / 0.92), 1.45)
+
+			var freq := lerpf(f0, f1, t)
+			var tone := 0.0
+			if freq > 1.0:
+				phase_acc += TAU * freq / float(mix_rate)
+				tone = sin(phase_acc) + 0.28 * sin(phase_acc * 2.0)
+
+			var bit := ((lfsr >> 0) ^ (lfsr >> 2) ^ (lfsr >> 3) ^ (lfsr >> 5)) & 1
+			lfsr = (lfsr >> 1) | (bit << 15)
+			var n_val := (float(lfsr & 0xFFFF) / 32768.0) - 1.0
+
+			var sample := (tone * (1.0 - noise_mix * 0.55) + n_val * noise_mix) * vol * env
+			var i_sample := clampi(int(sample * 28000.0), -32767, 32767)
+			pcm[write_pos] = i_sample & 0xFF
+			pcm[write_pos + 1] = (i_sample >> 8) & 0xFF
+			write_pos += 2
+
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = mix_rate
+	wav.stereo = false
+	wav.data = pcm
+	return wav
+
+func _play_sfx(key: String) -> void:
+	if not sfx_enabled or not sfx_bank.has(key) or sfx_players.is_empty():
+		return
+	var p := sfx_players[sfx_pool_idx]
+	sfx_pool_idx = (sfx_pool_idx + 1) % sfx_players.size()
+	p.stream = sfx_bank[key]
+	p.play()
 
 func _setup_korean_font() -> void:
 	if ResourceLoader.exists("res://fonts/NanumSquareRoundB.ttf"):
@@ -297,6 +420,16 @@ func _build_ui() -> void:
 			_refresh_played_cards_modal()
 	)
 	top_hbox.add_child(played_cards_btn)
+
+	sfx_toggle_btn = Button.new()
+	sfx_toggle_btn.text = "♪ 효과음: ON"
+	sfx_toggle_btn.pressed.connect(func() -> void:
+		sfx_enabled = not sfx_enabled
+		sfx_toggle_btn.text = "♪ 효과음: ON" if sfx_enabled else "♪ 효과음: OFF"
+		if sfx_enabled:
+			_play_sfx("discard_click")
+	)
+	top_hbox.add_child(sfx_toggle_btn)
 
 	var help_btn := Button.new()
 	help_btn.text = "규칙 안내"
@@ -626,6 +759,7 @@ func start_new_round() -> void:
 
 	_clear_trick_slots()
 	_refresh_all_ui()
+	_play_sfx("deal")
 	_set_rich_text(log_label, "카드가 배분되었습니다. 경매를 시작합니다!", "#C7F2D9", true)
 	_process_bidding_turn(gen)
 
@@ -672,6 +806,7 @@ func _process_bidding_turn(gen: int) -> void:
 			return
 		var decision := Rules.ai_decide_bid(hands[current_bidder], highest_bid)
 		if str(decision["action"]) == "bid":
+			_play_sfx("bid")
 			highest_bid = int(decision["contract"])
 			highest_bid_suit = int(decision["suit"])
 			declarer_idx = current_bidder
@@ -687,6 +822,7 @@ func _process_bidding_turn(gen: int) -> void:
 				_start_kitty_phase(gen)
 				return
 		else:
+			_play_sfx("pass")
 			passed_players[current_bidder] = true
 			_set_rich_text(player_bubble_labels[current_bidder], "패스 (Pass)", "#A6FAC8", false)
 			_set_rich_text(log_label, "%s님이 패스했습니다." % PLAYER_NAMES[current_bidder], "#C7F2D9", true)
@@ -780,6 +916,7 @@ func _show_human_bidding_modal(gen: int) -> void:
 	_style_suit_button(bid_btn, selected_bid_suit, true)
 	bid_btn.pressed.connect(func() -> void:
 		center_modal.visible = false
+		_play_sfx("bid")
 		highest_bid = selected_bid_score
 		highest_bid_suit = selected_bid_suit
 		declarer_idx = 0
@@ -794,6 +931,7 @@ func _show_human_bidding_modal(gen: int) -> void:
 	pass_btn.text = "패스 (Pass)"
 	pass_btn.pressed.connect(func() -> void:
 		center_modal.visible = false
+		_play_sfx("pass")
 		passed_players[0] = true
 		_set_rich_text(player_bubble_labels[0], "패스 (Pass)", "#A6FAC8", false)
 		_set_rich_text(log_label, "내가 경매를 패스했습니다.", "#C7F2D9", true)
@@ -816,6 +954,7 @@ func _start_kitty_phase(gen: int) -> void:
 	if gen != round_generation:
 		return
 	phase = Phase.KITTY_EXCHANGE
+	_play_sfx("contract")
 	for i in range(5):
 		_set_rich_text(player_bubble_labels[i], "")
 	_set_rich_text(player_bubble_labels[declarer_idx], "주공 당선! (%s %d점)" % [Rules.SUIT_NAMES[trump_suit], contract_score], "#A6FAC8", false)
@@ -847,6 +986,7 @@ func _start_kitty_phase(gen: int) -> void:
 				captured_points[declarer_idx].append(d)
 		friend_spec = prep["friend_spec"]
 		_resolve_card_friend_owner()
+		_play_sfx("contract")
 		_set_rich_text(log_label, "주공 %s님이 [%s]를 선언했습니다!" % [PLAYER_NAMES[declarer_idx], str(friend_spec["label"])], "#C7F2D9", true)
 		_start_trick_play_phase(gen)
 
@@ -925,6 +1065,7 @@ func _show_human_kitty_modal(gen: int) -> void:
 		friend_spec = friend_options[selected_friend_option]
 		_resolve_card_friend_owner()
 		center_modal.visible = false
+		_play_sfx("contract")
 		_set_rich_text(log_label, "내가 [%s]를 선언하고 본 게임을 시작합니다!" % str(friend_spec["label"]), "#C7F2D9", true)
 		_start_trick_play_phase(gen)
 	)
@@ -1010,6 +1151,7 @@ func _on_human_card_clicked(card: Dictionary) -> void:
 		return
 
 	if phase == Phase.KITTY_EXCHANGE:
+		_play_sfx("discard_click")
 		var cid: String = str(card["id"])
 		if discard_selected_ids.has(cid):
 			discard_selected_ids.erase(cid)
@@ -1108,6 +1250,11 @@ func _execute_card_play(gen: int, player_idx: int, card: Dictionary, declare_jok
 			lead_info["joker_call_active"] = false
 			lead_info["note"] = "선문양: %s" % str(Rules.SUIT_NAMES[int(card["suit"])])
 
+	if Rules.is_mighty(card, trump_suit) or Rules.is_joker(card) or (declare_joker_call and Rules.is_joker_call(card, trump_suit)):
+		_play_sfx("special_card")
+	else:
+		_play_sfx("card_play")
+
 	trick_plays.append({
 		"player": player_idx,
 		"card": card
@@ -1125,6 +1272,7 @@ func _execute_card_play(gen: int, player_idx: int, card: Dictionary, declare_jok
 		if player_idx != declarer_idx:
 			friend_player_idx = player_idx
 			friend_revealed = true
+			_play_sfx("friend_reveal")
 			_set_rich_text(log_label, "[프렌드 공개] %s님이 프렌드 카드(%s)를 내어 여당임이 밝혀졌습니다!" % [
 				PLAYER_NAMES[player_idx],
 				Rules.card_short_name(card)
@@ -1146,6 +1294,7 @@ func _finish_trick(gen: int) -> void:
 			friend_player_idx = winner_idx
 		friend_revealed = true
 		_render_all_trick_slots()
+		_play_sfx("friend_reveal")
 		_set_rich_text(log_label, "[프렌드 공개] 초구 승리자 %s님이 프렌드(여당)가 되었습니다!" % PLAYER_NAMES[winner_idx], "#C7F2D9", true)
 
 	var pts_won := 0
@@ -1155,6 +1304,7 @@ func _finish_trick(gen: int) -> void:
 			captured_points[winner_idx].append(c)
 			pts_won += 1
 
+	_play_sfx("trick_win")
 	_set_rich_text(trick_info_banner, "%d라운드 승자: %s (%s) — 점수 +%d점 획득!" % [
 		trick_number,
 		PLAYER_NAMES[winner_idx],
@@ -1216,6 +1366,10 @@ func _finish_round() -> void:
 			else:
 				score_changes[i] = delta_base
 		total_scores[i] += score_changes[i]
+
+	var human_in_ruling := (declarer_idx == 0 or friend_player_idx == 0)
+	var human_won := (ruling_won and human_in_ruling) or ((not ruling_won) and (not human_in_ruling))
+	_play_sfx("round_win" if human_won else "round_lose")
 
 	_refresh_all_ui()
 	_show_round_result_modal(ruling_won, ruling_pts, def_pts, score_changes)
