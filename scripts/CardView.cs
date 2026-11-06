@@ -12,13 +12,23 @@ public partial class CardView : Button
     private bool _isSelectedForDiscard;
     private bool _isLegalPlay = true;
     private bool _compactMode;
+    private bool _miniMode;
 
-    public void Setup(CardData data, Suit trumpSuit = Suit.None, bool compact = false)
+    public void Setup(CardData data, Suit trumpSuit = Suit.None, bool compact = false, bool mini = false)
     {
         _cardData = data;
         _trumpSuit = trumpSuit;
         _compactMode = compact;
-        CustomMinimumSize = compact ? new Vector2(72, 102) : new Vector2(86, 124);
+        _miniMode = mini;
+        if (_miniMode)
+        {
+            CustomMinimumSize = new Vector2(40, 54);
+            Size = new Vector2(40, 54);
+        }
+        else
+        {
+            CustomMinimumSize = compact ? new Vector2(72, 102) : new Vector2(86, 124);
+        }
         Flat = true;
         MouseDefaultCursorShape = CursorShape.PointingHand;
 
@@ -66,38 +76,36 @@ public partial class CardView : Button
 
         float w = Size.X;
         float h = Size.Y;
-        float yOffset = ((IsHovered() && _isLegalPlay) || _isSelectedForDiscard) ? -10.0f : 0.0f;
+        float yOffset = (!_miniMode && ((IsHovered() && _isLegalPlay) || _isSelectedForDiscard)) ? -10.0f : 0.0f;
         var rect = new Rect2(new Vector2(0, yOffset), new Vector2(w, h));
 
-        // 그림자
-        DrawRect(new Rect2(rect.Position + new Vector2(3, 4), rect.Size), new Color(0, 0, 0, 0.38f), true);
+        var shadowOffset = _miniMode ? new Vector2(2, 2) : new Vector2(3, 4);
+        DrawRect(new Rect2(rect.Position + shadowOffset, rect.Size), new Color(0, 0, 0, 0.38f), true);
 
-        // 배경
         var bgCol = new Color(0.99f, 0.985f, 0.96f);
         if (_isSelectedForDiscard)
             bgCol = new Color(1.0f, 0.93f, 0.72f);
-        else if (!_isLegalPlay)
-            bgCol = new Color(0.76f, 0.78f, 0.77f);
+        else if (!_isLegalPlay && !_miniMode)
+            bgCol = new Color(0.88f, 0.89f, 0.88f);
 
         DrawRect(rect, bgCol, true);
 
-        // 테두리
         var borderCol = new Color(0.22f, 0.26f, 0.30f);
-        float borderW = 2.0f;
+        float borderW = _miniMode ? 1.5f : 2.0f;
         if (MightyRules.IsMighty(_cardData, _trumpSuit))
         {
             borderCol = new Color(0.92f, 0.68f, 0.08f);
-            borderW = 3.5f;
+            borderW = _miniMode ? 2.5f : 3.5f;
         }
         else if (MightyRules.IsJoker(_cardData))
         {
             borderCol = new Color(0.58f, 0.24f, 0.88f);
-            borderW = 3.0f;
+            borderW = _miniMode ? 2.0f : 3.0f;
         }
         else if (_trumpSuit != Suit.None && _cardData.Suit == _trumpSuit)
         {
             borderCol = new Color(0.14f, 0.65f, 0.38f);
-            borderW = 2.5f;
+            borderW = _miniMode ? 2.0f : 2.5f;
         }
 
         if (_isSelectedForDiscard)
@@ -115,8 +123,34 @@ public partial class CardView : Button
         else if (_cardData.Suit == Suit.Joker)
             textCol = new Color(0.48f, 0.16f, 0.78f);
 
-        if (!_isLegalPlay)
-            textCol = textCol.Darkened(0.35f);
+        if (!_isLegalPlay && !_miniMode)
+            textCol = textCol.Darkened(0.22f);
+
+        if (_miniMode)
+        {
+            if (_cardData.Suit == Suit.Joker)
+            {
+                DrawString(font, rect.Position + new Vector2(3, 14), "JK", HorizontalAlignment.Left, -1, 11, textCol);
+                DrawString(font, rect.Position + new Vector2(0, h * 0.68f), "★", HorizontalAlignment.Center, w, 18, textCol);
+            }
+            else
+            {
+                string rStrM = MightyRules.GetRankString(_cardData.Rank);
+                string sStrM = MightyRules.GetSuitSymbol(_cardData.Suit);
+                DrawString(font, rect.Position + new Vector2(3, 14), rStrM, HorizontalAlignment.Left, -1, 12, textCol);
+                if (_cardData.Suit == Suit.Diamond)
+                {
+                    DrawDiamond(rect.Position + new Vector2(8, 23), 3.0f, 4.0f, textCol);
+                    DrawDiamond(rect.Position + new Vector2(w * 0.62f, h * 0.64f), 5.5f, 7.2f, textCol);
+                }
+                else
+                {
+                    DrawString(font, rect.Position + new Vector2(3, 27), sStrM, HorizontalAlignment.Left, -1, 11, textCol);
+                    DrawString(font, rect.Position + new Vector2(6, h * 0.76f), sStrM, HorizontalAlignment.Center, w - 6, 17, textCol);
+                }
+            }
+            return;
+        }
 
         if (_cardData.Suit == Suit.Joker)
         {

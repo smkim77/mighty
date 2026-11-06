@@ -9,12 +9,20 @@ var trump_suit: int = Rules.SUIT_NONE
 var is_selected_for_discard: bool = false
 var is_legal_play: bool = true
 var compact_mode: bool = false
+var mini_mode: bool = false
 
-func setup(data: Dictionary, p_trump_suit: int = Rules.SUIT_NONE, p_compact: bool = false) -> void:
+func setup(data: Dictionary, p_trump_suit: int = Rules.SUIT_NONE, p_compact: bool = false, p_mini: bool = false) -> void:
 	card_data = data
 	trump_suit = p_trump_suit
 	compact_mode = p_compact
-	custom_minimum_size = Vector2(72, 102) if compact_mode else Vector2(86, 124)
+	mini_mode = p_mini
+	if mini_mode:
+		custom_minimum_size = Vector2(40, 54)
+		size = Vector2(40, 54)
+	elif compact_mode:
+		custom_minimum_size = Vector2(72, 102)
+	else:
+		custom_minimum_size = Vector2(86, 124)
 	flat = true
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	pressed.connect(_on_pressed)
@@ -51,30 +59,33 @@ func _draw() -> void:
 
 	var w := size.x
 	var h := size.y
-	var y_offset := -10.0 if (is_hovered() and is_legal_play) or is_selected_for_discard else 0.0
+	var y_offset := 0.0
+	if not mini_mode and ((is_hovered() and is_legal_play) or is_selected_for_discard):
+		y_offset = -10.0
 	var rect := Rect2(Vector2(0, y_offset), Vector2(w, h))
 
-	draw_rect(Rect2(rect.position + Vector2(3, 4), rect.size), Color(0, 0, 0, 0.38), true)
+	var shadow_offset := Vector2(2, 2) if mini_mode else Vector2(3, 4)
+	draw_rect(Rect2(rect.position + shadow_offset, rect.size), Color(0, 0, 0, 0.38), true)
 
 	var bg_col := Color(0.99, 0.985, 0.96)
 	if is_selected_for_discard:
 		bg_col = Color(1.0, 0.93, 0.72)
-	elif not is_legal_play:
-		bg_col = Color(0.76, 0.78, 0.77)
+	elif not is_legal_play and not mini_mode:
+		bg_col = Color(0.88, 0.89, 0.88)
 
 	draw_rect(rect, bg_col, true)
 
 	var border_col := Color(0.22, 0.26, 0.30)
-	var border_w := 2.0
+	var border_w := 1.5 if mini_mode else 2.0
 	if Rules.is_mighty(card_data, trump_suit):
 		border_col = Color(0.92, 0.68, 0.08)
-		border_w = 3.5
+		border_w = 2.5 if mini_mode else 3.5
 	elif Rules.is_joker(card_data):
 		border_col = Color(0.58, 0.24, 0.88)
-		border_w = 3.0
+		border_w = 2.0 if mini_mode else 3.0
 	elif trump_suit != Rules.SUIT_NONE and int(card_data["suit"]) == trump_suit:
 		border_col = Color(0.14, 0.65, 0.38)
-		border_w = 2.5
+		border_w = 2.0 if mini_mode else 2.5
 
 	if is_selected_for_discard:
 		border_col = Color(0.95, 0.32, 0.18)
@@ -92,8 +103,24 @@ func _draw() -> void:
 	elif suit == Rules.SUIT_JOKER:
 		text_col = Color(0.48, 0.16, 0.78)
 
-	if not is_legal_play:
-		text_col = text_col.darkened(0.35)
+	if not is_legal_play and not mini_mode:
+		text_col = text_col.darkened(0.22)
+
+	if mini_mode:
+		if suit == Rules.SUIT_JOKER:
+			draw_string(font, rect.position + Vector2(3, 14), "JK", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, text_col)
+			draw_string(font, rect.position + Vector2(0, h * 0.68), "★", HORIZONTAL_ALIGNMENT_CENTER, w, 18, text_col)
+		else:
+			var r_str_m := Rules.rank_str(rank)
+			var s_str_m: String = str(Rules.SUIT_SYMBOLS[suit])
+			draw_string(font, rect.position + Vector2(3, 14), r_str_m, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, text_col)
+			if suit == Rules.SUIT_DIAMOND:
+				_draw_diamond(rect.position + Vector2(8, 23), 3.0, 4.0, text_col)
+				_draw_diamond(rect.position + Vector2(w * 0.62, h * 0.64), 5.5, 7.2, text_col)
+			else:
+				draw_string(font, rect.position + Vector2(3, 27), s_str_m, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, text_col)
+				draw_string(font, rect.position + Vector2(6, h * 0.76), s_str_m, HORIZONTAL_ALIGNMENT_CENTER, w - 6, 17, text_col)
+		return
 
 	if suit == Rules.SUIT_JOKER:
 		draw_string(font, rect.position + Vector2(8, 22), "JOKER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)

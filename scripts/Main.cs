@@ -6,6 +6,13 @@ using Godot;
 
 namespace MightyGame;
 
+public sealed class PlayedCardRecord
+{
+    public int PlayerIndex { get; init; }
+    public CardData Card { get; init; } = new();
+    public int TrickNumber { get; init; }
+}
+
 public partial class Main : Control
 {
     private enum Phase
@@ -25,11 +32,26 @@ public partial class Main : Control
         "AI 수진"
     };
 
+    private static readonly Color[] PlayerColors =
+    {
+        new(0.48f, 0.98f, 0.64f),
+        new(0.45f, 0.84f, 1.00f),
+        new(1.00f, 0.58f, 0.68f),
+        new(0.82f, 0.68f, 1.00f),
+        new(1.00f, 0.85f, 0.45f)
+    };
+
+    private static readonly Color ColorRulingMain = new(1.00f, 0.80f, 0.22f);
+    private static readonly Color ColorRulingFriend = new(1.00f, 0.64f, 0.26f);
+    private static readonly Color ColorOpposition = new(0.42f, 0.86f, 1.00f);
+    private static readonly Color ColorUnknownRole = new(0.78f, 0.86f, 0.80f);
+
     private readonly Random _rng = new();
     private Phase _phase = Phase.Bidding;
     private readonly List<CardData>[] _hands = { new(), new(), new(), new(), new() };
     private List<CardData> _kitty = new();
     private readonly List<CardData>[] _capturedPoints = { new(), new(), new(), new(), new() };
+    private readonly List<PlayedCardRecord> _playedCardsHistory = new();
     private readonly int[] _totalScores = new int[5];
 
     // 경매 상태
@@ -58,16 +80,18 @@ public partial class Main : Control
     private LeadInfo _leadInfo = new();
     private bool _waitingForHuman;
     private int _roundGeneration;
+    private int _activeSeatIdx = -1;
 
     // UI 참조
     private Label _topStatusLabel = null!;
     private Label _contractInfoLabel = null!;
     private Label _teamScoreLabel = null!;
+    private Button _playedCardsBtn = null!;
     private Label _logLabel = null!;
     private readonly List<PanelContainer> _playerSeatPanels = new();
     private readonly List<Label> _playerRoleLabels = new();
     private readonly List<Label> _playerCardCountLabels = new();
-    private readonly List<Label> _playerCapturedLabels = new();
+    private readonly List<Control> _playerCapturedBoxes = new();
     private readonly List<Label> _playerBubbleLabels = new();
 
     private readonly List<VBoxContainer> _trickSlots = new();
@@ -78,6 +102,8 @@ public partial class Main : Control
     private PanelContainer _centerModal = null!;
     private VBoxContainer _modalVbox = null!;
     private PanelContainer _helpPanel = null!;
+    private PanelContainer _playedCardsPanel = null!;
+    private VBoxContainer _playedCardsVbox = null!;
 
     public override void _Ready()
     {
@@ -120,10 +146,10 @@ public partial class Main : Control
         {
             BgColor = bg,
             BorderColor = border,
-            ContentMarginLeft = 12,
-            ContentMarginRight = 12,
-            ContentMarginTop = 8,
-            ContentMarginBottom = 8
+            ContentMarginLeft = 10,
+            ContentMarginRight = 10,
+            ContentMarginTop = 6,
+            ContentMarginBottom = 6
         };
         sb.SetBorderWidthAll(borderW);
         sb.SetCornerRadiusAll(radius);
@@ -141,7 +167,7 @@ public partial class Main : Control
 
         var mainVbox = new VBoxContainer();
         mainVbox.SetAnchorsPreset(LayoutPreset.FullRect);
-        mainVbox.AddThemeConstantOverride("separation", 8);
+        mainVbox.AddThemeConstantOverride("separation", 6);
         AddChild(mainVbox);
 
         // 1. 상단 정보 바
@@ -150,16 +176,16 @@ public partial class Main : Control
         mainVbox.AddChild(topBar);
 
         var topHbox = new HBoxContainer();
-        topHbox.AddThemeConstantOverride("separation", 18);
+        topHbox.AddThemeConstantOverride("separation", 14);
         topBar.AddChild(topHbox);
 
-        var titleLbl = new Label { Text = "♠ 마이티 (MIGHTY C#)" };
-        titleLbl.AddThemeFontSizeOverride("font_size", 20);
+        var titleLbl = new Label { Text = "♠ 마이티 (MIGHTY)" };
+        titleLbl.AddThemeFontSizeOverride("font_size", 19);
         titleLbl.AddThemeColorOverride("font_color", new Color(0.98f, 0.84f, 0.28f));
         topHbox.AddChild(titleLbl);
 
         _topStatusLabel = new Label { Text = "경매 준비 중" };
-        _topStatusLabel.AddThemeFontSizeOverride("font_size", 15);
+        _topStatusLabel.AddThemeFontSizeOverride("font_size", 14);
         _topStatusLabel.AddThemeColorOverride("font_color", new Color(0.85f, 0.96f, 0.90f));
         topHbox.AddChild(_topStatusLabel);
 
@@ -170,14 +196,23 @@ public partial class Main : Control
             Text = "공약: 미정 | 주공: 미정 | 프렌드: 미정",
             SizeFlagsHorizontal = SizeFlags.ExpandFill
         };
-        _contractInfoLabel.AddThemeFontSizeOverride("font_size", 15);
+        _contractInfoLabel.AddThemeFontSizeOverride("font_size", 14);
         _contractInfoLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.95f, 0.78f));
         topHbox.AddChild(_contractInfoLabel);
 
-        _teamScoreLabel = new Label { Text = "여당: 0점 | 야당: 0점" };
-        _teamScoreLabel.AddThemeFontSizeOverride("font_size", 15);
-        _teamScoreLabel.AddThemeColorOverride("font_color", new Color(0.75f, 0.95f, 1.0f));
+        _teamScoreLabel = new Label { Text = "★여당: 0점 | ◆야당: 0점" };
+        _teamScoreLabel.AddThemeFontSizeOverride("font_size", 14);
+        _teamScoreLabel.AddThemeColorOverride("font_color", ColorRulingMain);
         topHbox.AddChild(_teamScoreLabel);
+
+        _playedCardsBtn = new Button { Text = "나온 카드 보기 (0장)" };
+        _playedCardsBtn.Pressed += () =>
+        {
+            _playedCardsPanel.Visible = !_playedCardsPanel.Visible;
+            if (_playedCardsPanel.Visible)
+                RefreshPlayedCardsModal();
+        };
+        topHbox.AddChild(_playedCardsBtn);
 
         var helpBtn = new Button { Text = "규칙 안내" };
         helpBtn.Pressed += () => _helpPanel.Visible = !_helpPanel.Visible;
@@ -196,31 +231,31 @@ public partial class Main : Control
 
         Vector2[] seatAnchors =
         {
-            new(0.02f, 0.74f),
-            new(0.02f, 0.40f),
-            new(0.02f, 0.04f),
-            new(0.78f, 0.04f),
-            new(0.78f, 0.40f)
+            new(0.015f, 0.67f),
+            new(0.015f, 0.34f),
+            new(0.015f, 0.02f),
+            new(0.775f, 0.02f),
+            new(0.775f, 0.34f)
         };
 
         for (int i = 0; i < 5; i++)
         {
             var seat = new PanelContainer
             {
-                CustomMinimumSize = new Vector2(245, 118),
+                CustomMinimumSize = new Vector2(262, 152),
                 AnchorLeft = seatAnchors[i].X,
                 AnchorTop = seatAnchors[i].Y,
                 AnchorRight = seatAnchors[i].X,
                 AnchorBottom = seatAnchors[i].Y,
-                OffsetRight = 245,
-                OffsetBottom = 118
+                OffsetRight = 262,
+                OffsetBottom = 152
             };
             seat.AddThemeStyleboxOverride("panel", MakePanelStyle(new Color(0.07f, 0.16f, 0.12f, 0.92f), new Color(0.28f, 0.52f, 0.38f), 10, 2));
             tableArea.AddChild(seat);
             _playerSeatPanels.Add(seat);
 
             var sv = new VBoxContainer();
-            sv.AddThemeConstantOverride("separation", 4);
+            sv.AddThemeConstantOverride("separation", 3);
             seat.AddChild(sv);
 
             var headerHb = new HBoxContainer();
@@ -228,38 +263,35 @@ public partial class Main : Control
 
             var nameLbl = new Label
             {
-                Text = PlayerNames[i],
+                Text = "● " + PlayerNames[i],
                 SizeFlagsHorizontal = SizeFlags.ExpandFill
             };
             nameLbl.AddThemeFontSizeOverride("font_size", 15);
-            nameLbl.AddThemeColorOverride("font_color", Colors.White);
+            nameLbl.AddThemeColorOverride("font_color", PlayerColors[i]);
             headerHb.AddChild(nameLbl);
 
             var roleLbl = new Label { Text = "대기" };
             roleLbl.AddThemeFontSizeOverride("font_size", 13);
-            roleLbl.AddThemeColorOverride("font_color", new Color(0.95f, 0.82f, 0.30f));
+            roleLbl.AddThemeColorOverride("font_color", ColorUnknownRole);
             headerHb.AddChild(roleLbl);
             _playerRoleLabels.Add(roleLbl);
 
-            var countLbl = new Label { Text = "남은 패: 10장 | 누적: 0점" };
-            countLbl.AddThemeFontSizeOverride("font_size", 13);
-            countLbl.AddThemeColorOverride("font_color", new Color(0.80f, 0.90f, 0.84f));
+            var countLbl = new Label { Text = "남은 패: 10장 | 획득: 0점 | 누적: 0점" };
+            countLbl.AddThemeFontSizeOverride("font_size", 12);
+            countLbl.AddThemeColorOverride("font_color", new Color(0.84f, 0.92f, 0.88f));
             sv.AddChild(countLbl);
             _playerCardCountLabels.Add(countLbl);
 
-            var capLbl = new Label
+            var capBox = new Control
             {
-                Text = "획득 점수패(0점): 없음",
-                AutowrapMode = TextServer.AutowrapMode.WordSmart
+                CustomMinimumSize = new Vector2(240, 56)
             };
-            capLbl.AddThemeFontSizeOverride("font_size", 12);
-            capLbl.AddThemeColorOverride("font_color", new Color(0.98f, 0.88f, 0.55f));
-            sv.AddChild(capLbl);
-            _playerCapturedLabels.Add(capLbl);
+            sv.AddChild(capBox);
+            _playerCapturedBoxes.Add(capBox);
 
             var bubbleLbl = new Label { Text = "" };
-            bubbleLbl.AddThemeFontSizeOverride("font_size", 13);
-            bubbleLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.95f, 0.72f));
+            bubbleLbl.AddThemeFontSizeOverride("font_size", 12);
+            bubbleLbl.AddThemeColorOverride("font_color", new Color(0.65f, 0.98f, 0.78f));
             sv.AddChild(bubbleLbl);
             _playerBubbleLabels.Add(bubbleLbl);
         }
@@ -267,10 +299,10 @@ public partial class Main : Control
         // 중앙 트릭 보드
         var trickBoard = new PanelContainer
         {
-            AnchorLeft = 0.24f,
-            AnchorRight = 0.76f,
-            AnchorTop = 0.04f,
-            AnchorBottom = 0.94f
+            AnchorLeft = 0.235f,
+            AnchorRight = 0.765f,
+            AnchorTop = 0.03f,
+            AnchorBottom = 0.95f
         };
         trickBoard.AddThemeStyleboxOverride("panel", MakePanelStyle(new Color(0.045f, 0.15f, 0.105f, 0.85f), new Color(0.22f, 0.45f, 0.32f), 16, 2));
         tableArea.AddChild(trickBoard);
@@ -302,7 +334,7 @@ public partial class Main : Control
             Alignment = BoxContainer.AlignmentMode.Center,
             SizeFlagsVertical = SizeFlags.ExpandFill
         };
-        slotsHbox.AddThemeConstantOverride("separation", 16);
+        slotsHbox.AddThemeConstantOverride("separation", 14);
         boardVbox.AddChild(slotsHbox);
 
         for (int i = 0; i < 5; i++)
@@ -310,7 +342,7 @@ public partial class Main : Control
             var slotV = new VBoxContainer
             {
                 Alignment = BoxContainer.AlignmentMode.Center,
-                CustomMinimumSize = new Vector2(96, 150)
+                CustomMinimumSize = new Vector2(92, 150)
             };
             slotsHbox.AddChild(slotV);
             _trickSlots.Add(slotV);
@@ -318,9 +350,9 @@ public partial class Main : Control
 
         _centerModal = new PanelContainer
         {
-            AnchorLeft = 0.25f,
-            AnchorRight = 0.75f,
-            AnchorTop = 0.14f,
+            AnchorLeft = 0.245f,
+            AnchorRight = 0.755f,
+            AnchorTop = 0.12f,
             AnchorBottom = 0.88f
         };
         _centerModal.AddThemeStyleboxOverride("panel", MakePanelStyle(new Color(0.08f, 0.13f, 0.16f, 0.97f), new Color(0.88f, 0.72f, 0.24f), 14, 2));
@@ -336,7 +368,7 @@ public partial class Main : Control
         // 3. 하단 내 손패 영역
         var bottomPanel = new PanelContainer
         {
-            CustomMinimumSize = new Vector2(0, 190)
+            CustomMinimumSize = new Vector2(0, 186)
         };
         bottomPanel.AddThemeStyleboxOverride("panel", MakePanelStyle(new Color(0.04f, 0.11f, 0.08f, 0.96f), new Color(0.26f, 0.50f, 0.36f), 0, 1));
         mainVbox.AddChild(bottomPanel);
@@ -369,7 +401,120 @@ public partial class Main : Control
         _handContainer.AddThemeConstantOverride("separation", 8);
         scroll.AddChild(_handContainer);
 
+        BuildPlayedCardsOverlay();
         BuildHelpOverlay();
+    }
+
+    private void BuildPlayedCardsOverlay()
+    {
+        _playedCardsPanel = new PanelContainer
+        {
+            Visible = false,
+            AnchorLeft = 0.14f,
+            AnchorRight = 0.86f,
+            AnchorTop = 0.08f,
+            AnchorBottom = 0.88f
+        };
+        _playedCardsPanel.AddThemeStyleboxOverride("panel", MakePanelStyle(new Color(0.05f, 0.10f, 0.14f, 0.98f), new Color(0.45f, 0.82f, 0.96f), 14, 2));
+        AddChild(_playedCardsPanel);
+
+        _playedCardsVbox = new VBoxContainer();
+        _playedCardsVbox.AddThemeConstantOverride("separation", 8);
+        _playedCardsPanel.AddChild(_playedCardsVbox);
+    }
+
+    private void RefreshPlayedCardsModal()
+    {
+        foreach (Node child in _playedCardsVbox.GetChildren())
+            child.QueueFree();
+
+        var headerHb = new HBoxContainer();
+        _playedCardsVbox.AddChild(headerHb);
+
+        var title = new Label
+        {
+            Text = $"♠ 이미 나온 카드 기록 (총 {_playedCardsHistory.Count}장)",
+            SizeFlagsHorizontal = SizeFlags.ExpandFill
+        };
+        title.AddThemeFontSizeOverride("font_size", 19);
+        title.AddThemeColorOverride("font_color", new Color(0.98f, 0.86f, 0.32f));
+        headerHb.AddChild(title);
+
+        var subLbl = new Label { Text = "문양별 카드와 낸 플레이어(라운드)가 표시됩니다" };
+        subLbl.AddThemeFontSizeOverride("font_size", 13);
+        subLbl.AddThemeColorOverride("font_color", new Color(0.75f, 0.88f, 0.82f));
+        headerHb.AddChild(subLbl);
+
+        Suit[] suitsOrder = { Suit.Spade, Suit.Diamond, Suit.Heart, Suit.Club, Suit.Joker };
+        foreach (var s in suitsOrder)
+        {
+            var rowPanel = new PanelContainer();
+            rowPanel.AddThemeStyleboxOverride("panel", MakePanelStyle(new Color(0.08f, 0.15f, 0.19f, 0.92f), new Color(0.22f, 0.38f, 0.46f), 8, 1));
+            _playedCardsVbox.AddChild(rowPanel);
+
+            var rowHb = new HBoxContainer();
+            rowHb.AddThemeConstantOverride("separation", 12);
+            rowPanel.AddChild(rowHb);
+
+            var suitItems = _playedCardsHistory
+                .Where(item => item.Card.Suit == s)
+                .OrderByDescending(item => item.Card.Rank)
+                .ToList();
+
+            var sLbl = new Label
+            {
+                CustomMinimumSize = new Vector2(130, 0),
+                Text = $"{MightyRules.GetSuitName(s)} ({suitItems.Count}장)"
+            };
+            sLbl.AddThemeFontSizeOverride("font_size", 14);
+            if (MightyRules.IsRedSuit(s))
+                sLbl.AddThemeColorOverride("font_color", new Color(1.0f, 0.52f, 0.56f));
+            else if (s == Suit.Joker)
+                sLbl.AddThemeColorOverride("font_color", new Color(0.84f, 0.64f, 1.0f));
+            else
+                sLbl.AddThemeColorOverride("font_color", new Color(0.88f, 0.94f, 0.98f));
+            rowHb.AddChild(sLbl);
+
+            if (suitItems.Count == 0)
+            {
+                var emptyLbl = new Label { Text = "아직 나온 카드 없음" };
+                emptyLbl.AddThemeFontSizeOverride("font_size", 13);
+                emptyLbl.AddThemeColorOverride("font_color", new Color(0.52f, 0.62f, 0.58f));
+                rowHb.AddChild(emptyLbl);
+            }
+            else
+            {
+                var cardsHb = new HBoxContainer();
+                cardsHb.AddThemeConstantOverride("separation", 6);
+                rowHb.AddChild(cardsHb);
+
+                foreach (var item in suitItems)
+                {
+                    var itemVbox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+                    itemVbox.AddThemeConstantOverride("separation", 2);
+                    cardsHb.AddChild(itemVbox);
+
+                    var cv = new CardView();
+                    itemVbox.AddChild(cv);
+                    cv.Setup(item.Card, _trumpSuit, false, true);
+                    cv.SetLegal(false);
+
+                    string shortP = PlayerNames[item.PlayerIndex].Replace(" (플레이어)", "").Replace("AI ", "");
+                    var pLbl = new Label
+                    {
+                        Text = $"{shortP}(R{item.TrickNumber})",
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    };
+                    pLbl.AddThemeFontSizeOverride("font_size", 10);
+                    pLbl.AddThemeColorOverride("font_color", PlayerColors[item.PlayerIndex]);
+                    itemVbox.AddChild(pLbl);
+                }
+            }
+        }
+
+        var closeBtn = new Button { Text = "닫기" };
+        closeBtn.Pressed += () => _playedCardsPanel.Visible = false;
+        _playedCardsVbox.AddChild(closeBtn);
     }
 
     private void BuildHelpOverlay()
@@ -389,7 +534,7 @@ public partial class Main : Control
         hv.AddThemeConstantOverride("separation", 10);
         _helpPanel.AddChild(hv);
 
-        var htitle = new Label { Text = "📖 마이티(Mighty) 핵심 규칙 안내" };
+        var htitle = new Label { Text = "★ 마이티(Mighty) 핵심 규칙 안내" };
         htitle.AddThemeFontSizeOverride("font_size", 20);
         htitle.AddThemeColorOverride("font_color", new Color(0.98f, 0.84f, 0.28f));
         hv.AddChild(htitle);
@@ -402,7 +547,7 @@ public partial class Main : Control
                 "1. 인원 및 구성: 5명이 53장(조커 포함)으로 플레이합니다. 각 10장씩 배분하고 3장은 바닥패로 남깁니다.\n\n" +
                 "2. 경매(공약): 최소 13점부터 기루다(으뜸패) 문양과 목표 점수를 선언합니다. 최고 점수를 부른 사람이 '주공(대통령)'이 됩니다.\n\n" +
                 "3. 바닥패 교환 & 프렌드 지정: 주공은 바닥패 3장을 가져와 13장 중 3장을 버리고, 함께 팀(여당)이 될 '프렌드' 카드를 지정합니다.\n" +
-                "   - 프렌드로 지정된 카드를 가진 플레이어는 해당 카드를 내기 전까지 정체가 숨겨집니다.\n\n" +
+                "   - 여당(주공·프렌드)은 따뜻한 황금색/주황색, 야당(수비팀)은 시원한 하늘색으로 구분됩니다.\n\n" +
                 "4. 특수 카드 서열: 마이티(♠A, 단 스페이드가 기루다면 ◆A) > 조커(★) > 기루다(A~2) > 선공 문양(A~2)\n" +
                 "   - 초구(1라운드)에는 기루다 선공이 불가하며, 초구와 막구(10라운드)에는 조커의 효력이 없습니다.\n" +
                 "   - 조커 콜(♣3, 클로버가 기루다면 ♠3)로 선공하면 조커 보유자는 반드시 조커를 내야 합니다.\n\n" +
@@ -441,6 +586,9 @@ public partial class Main : Control
         }
 
         _kitty = deck.GetRange(50, 3);
+        _playedCardsHistory.Clear();
+        if (_playedCardsPanel != null)
+            _playedCardsPanel.Visible = false;
 
         _currentBidder = 0;
         _highestBid = 0;
@@ -456,6 +604,7 @@ public partial class Main : Control
         _friendRevealed = false;
         _trickNumber = 1;
         _trickPlays.Clear();
+        _activeSeatIdx = 0;
 
         ClearTrickSlots();
         RefreshAllUi();
@@ -463,6 +612,9 @@ public partial class Main : Control
         _ = ProcessBiddingTurnAsync(_roundGeneration);
     }
 
+    // =========================================================================
+    // 경매 (Bidding) 단계
+    // =========================================================================
     private async Task ProcessBiddingTurnAsync(int gen)
     {
         if (gen != _roundGeneration) return;
@@ -483,7 +635,8 @@ public partial class Main : Control
         {
             _logLabel.Text = "모두 패스하여 새 판을 배분합니다.";
             await DelaySeconds(1.0);
-            if (gen == _roundGeneration) StartNewRound();
+            if (gen == _roundGeneration)
+                StartNewRound();
             return;
         }
 
@@ -492,7 +645,7 @@ public partial class Main : Control
             _declarerIdx = lastActive;
             _trumpSuit = _highestBidSuit;
             _contractScore = _highestBid;
-            await StartKittyPhaseAsync(gen);
+            _ = StartKittyPhaseAsync(gen);
             return;
         }
 
@@ -514,19 +667,19 @@ public partial class Main : Control
             await DelaySeconds(0.55);
             if (gen != _roundGeneration) return;
 
-            var decision = MightyRules.AiDecideBid(_hands[_currentBidder], _highestBid);
-            if (decision.ShouldBid)
+            var (bid, suit, contract) = MightyRules.AiDecideBid(_hands[_currentBidder], _highestBid);
+            if (bid)
             {
-                _highestBid = decision.ContractScore;
-                _highestBidSuit = decision.BidSuit;
+                _highestBid = contract;
+                _highestBidSuit = suit;
                 _declarerIdx = _currentBidder;
-                _playerBubbleLabels[_currentBidder].Text = $"선언: {MightyRules.GetSuitSymbol(_highestBidSuit)} {_highestBid}점";
-                _logLabel.Text = $"{PlayerNames[_currentBidder]}님이 [{MightyRules.GetSuitName(_highestBidSuit)} {_highestBid}점] 공약을 선언했습니다!";
+                _playerBubbleLabels[_currentBidder].Text = $"선언: {MightyRules.GetSuitSymbol(suit)} {contract}점";
+                _logLabel.Text = $"{PlayerNames[_currentBidder]}님이 [{MightyRules.GetSuitName(suit)} {contract}점] 공약을 선언했습니다!";
                 if (_highestBid >= 20)
                 {
                     _trumpSuit = _highestBidSuit;
                     _contractScore = _highestBid;
-                    await StartKittyPhaseAsync(gen);
+                    _ = StartKittyPhaseAsync(gen);
                     return;
                 }
             }
@@ -562,10 +715,10 @@ public partial class Main : Control
 
         var curLbl = new Label
         {
+            HorizontalAlignment = HorizontalAlignment.Center,
             Text = _highestBid >= 13
                 ? $"현재 최고 공약: {PlayerNames[_declarerIdx]} ({MightyRules.GetSuitName(_highestBidSuit)} {_highestBid}점)"
-                : "현재 선언된 공약 없음 (최소 13점부터 가능)",
-            HorizontalAlignment = HorizontalAlignment.Center
+                : "현재 선언된 공약 없음 (최소 13점부터 가능)"
         };
         _modalVbox.AddChild(curLbl);
 
@@ -673,16 +826,16 @@ public partial class Main : Control
     }
 
     // =========================================================================
-    // 바닥패 교환 및 프렌드 지정 단계
+    // 바닥패 교환 및 프렌드 선언 단계
     // =========================================================================
     private async Task StartKittyPhaseAsync(int gen)
     {
         if (gen != _roundGeneration) return;
         _phase = Phase.KittyExchange;
-
         for (int i = 0; i < 5; i++)
             _playerBubbleLabels[i].Text = "";
         _playerBubbleLabels[_declarerIdx].Text = $"주공 당선! ({MightyRules.GetSuitSymbol(_trumpSuit)} {_contractScore}점)";
+        HighlightActiveSeat(_declarerIdx);
 
         _hands[_declarerIdx].AddRange(_kitty);
         MightyRules.SortHand(_hands[_declarerIdx], _trumpSuit);
@@ -705,15 +858,15 @@ public partial class Main : Control
             await DelaySeconds(1.0);
             if (gen != _roundGeneration) return;
 
-            var prep = MightyRules.AiPrepareDeclarer(_hands[_declarerIdx], _trumpSuit);
-            _hands[_declarerIdx] = prep.RemainingHand;
+            var (newHand, discards, friendSpec) = MightyRules.AiPrepareDeclarer(_hands[_declarerIdx], _trumpSuit);
+            _hands[_declarerIdx] = newHand;
             MightyRules.SortHand(_hands[_declarerIdx], _trumpSuit);
-            foreach (var d in prep.Discards)
+            foreach (var d in discards)
             {
                 if (MightyRules.IsPointCard(d))
                     _capturedPoints[_declarerIdx].Add(d);
             }
-            _friendSpec = prep.Friend;
+            _friendSpec = friendSpec;
             ResolveCardFriendOwner();
             _logLabel.Text = $"주공 {PlayerNames[_declarerIdx]}님이 [{_friendSpec.Label}]를 선언했습니다!";
             StartTrickPlayPhase(gen);
@@ -728,7 +881,6 @@ public partial class Main : Control
             new() { Type = FriendType.Card, CardId = mCard.Id, Label = $"마이티 ({MightyRules.GetCardShortName(mCard)}) 프렌드" },
             new() { Type = FriendType.Card, CardId = "joker", Label = "조커 (★) 프렌드" }
         };
-
         if (_trumpSuit != Suit.None)
         {
             var ta = new CardData { Id = $"{(int)_trumpSuit}_14", Suit = _trumpSuit, Rank = 14 };
@@ -736,7 +888,6 @@ public partial class Main : Control
             list.Add(new FriendSpec { Type = FriendType.Card, CardId = ta.Id, Label = $"기루다 A ({MightyRules.GetCardShortName(ta)}) 프렌드" });
             list.Add(new FriendSpec { Type = FriendType.Card, CardId = tk.Id, Label = $"기루다 K ({MightyRules.GetCardShortName(tk)}) 프렌드" });
         }
-
         list.Add(new FriendSpec { Type = FriendType.FirstTrick, CardId = "", Label = "초구 프렌드 (1라운드 승자)" });
         list.Add(new FriendSpec { Type = FriendType.None, CardId = "", Label = "노프렌드 (혼자서 승리 도전)" });
         return list;
@@ -881,8 +1032,8 @@ public partial class Main : Control
     private async Task ProcessTrickTurnAsync(int gen)
     {
         if (gen != _roundGeneration) return;
-        RefreshAllUi();
         HighlightActiveSeat(_turnPlayer);
+        RefreshAllUi();
 
         if (_trickPlays.Count == 5)
         {
@@ -995,7 +1146,7 @@ public partial class Main : Control
 
         var t = new Label
         {
-            Text = $"📢 조커 콜({MightyRules.GetCardShortName(jcCard)}) 카드를 내시겠습니까?",
+            Text = $"▶ 조커 콜({MightyRules.GetCardShortName(jcCard)}) 카드를 내시겠습니까?",
             HorizontalAlignment = HorizontalAlignment.Center
         };
         t.AddThemeFontSizeOverride("font_size", 18);
@@ -1041,7 +1192,7 @@ public partial class Main : Control
             {
                 _leadInfo.LeadSuit = card.Suit;
                 _leadInfo.JokerCallActive = true;
-                _leadInfo.Note = $"📢 조커 콜 발동! ({MightyRules.GetCardShortName(card)})";
+                _leadInfo.Note = $"▶ 조커 콜 발동! ({MightyRules.GetCardShortName(card)})";
             }
             else
             {
@@ -1057,13 +1208,22 @@ public partial class Main : Control
             Card = card
         });
 
+        _playedCardsHistory.Add(new PlayedCardRecord
+        {
+            PlayerIndex = playerIdx,
+            Card = card,
+            TrickNumber = _trickNumber
+        });
+        if (_playedCardsPanel != null && _playedCardsPanel.Visible)
+            RefreshPlayedCardsModal();
+
         if (_friendSpec.Type == FriendType.Card && card.Id == _friendSpec.CardId)
         {
             if (playerIdx != _declarerIdx)
             {
                 _friendPlayerIdx = playerIdx;
                 _friendRevealed = true;
-                _logLabel.Text = $"◆ {PlayerNames[playerIdx]}님이 프렌드 카드({MightyRules.GetCardShortName(card)})를 내어 여당(프렌드)임이 밝혀졌습니다!";
+                _logLabel.Text = $"[프렌드 공개] {PlayerNames[playerIdx]}님이 프렌드 카드({MightyRules.GetCardShortName(card)})를 내어 여당임이 밝혀졌습니다!";
             }
         }
 
@@ -1085,7 +1245,7 @@ public partial class Main : Control
             if (winnerIdx != _declarerIdx)
                 _friendPlayerIdx = winnerIdx;
             _friendRevealed = true;
-            _logLabel.Text = $"◆ 초구 승리자 {PlayerNames[winnerIdx]}님이 프렌드(여당)가 되었습니다!";
+            _logLabel.Text = $"[프렌드 공개] 초구 승리자 {PlayerNames[winnerIdx]}님이 프렌드(여당)가 되었습니다!";
         }
 
         int ptsWon = 0;
@@ -1176,35 +1336,52 @@ public partial class Main : Control
 
         var title = new Label
         {
-            Text = rulingWon ? "🎉 여당(주공+프렌드) 공약 달성 승리!" : "🛡️ 야당(수비팀) 공약 저지 승리!",
+            Text = rulingWon ? "★ 여당(주공+프렌드) 공약 달성 승리!" : "◆ 야당(수비팀) 공약 저지 승리!",
             HorizontalAlignment = HorizontalAlignment.Center
         };
         title.AddThemeFontSizeOverride("font_size", 21);
-        title.AddThemeColorOverride("font_color", rulingWon ? new Color(0.98f, 0.84f, 0.28f) : new Color(0.55f, 0.90f, 1.0f));
+        title.AddThemeColorOverride("font_color", rulingWon ? ColorRulingMain : ColorOpposition);
         _modalVbox.AddChild(title);
 
         string fName = _friendPlayerIdx != -1 ? PlayerNames[_friendPlayerIdx] : "없음(노프렌드)";
         var summary = new Label
         {
             Text = $"주공: {PlayerNames[_declarerIdx]} | 프렌드: {fName} ({_friendSpec.Label})\n" +
-                   $"공약: {MightyRules.GetSuitName(_trumpSuit)} {_contractScore}점  →  여당 획득: {rulingPts}점 / 야당 획득: {defPts}점",
+                   $"공약: {MightyRules.GetSuitName(_trumpSuit)} {_contractScore}점  →  ★여당 획득: {rulingPts}점 / ◆야당 획득: {defPts}점",
             HorizontalAlignment = HorizontalAlignment.Center
         };
         _modalVbox.AddChild(summary);
 
         for (int i = 0; i < 5; i++)
         {
-            string roleTag = "야당";
-            if (i == _declarerIdx) roleTag = "주공★";
-            else if (i == _friendPlayerIdx) roleTag = "프렌드◆";
-            string diffStr = scoreChanges[i] >= 0 ? $"+{scoreChanges[i]}" : scoreChanges[i].ToString();
+            var rowHb = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+            rowHb.AddThemeConstantOverride("separation", 8);
+            _modalVbox.AddChild(rowHb);
 
-            var row = new Label
+            var pLbl = new Label { Text = PlayerNames[i] };
+            pLbl.AddThemeColorOverride("font_color", PlayerColors[i]);
+            rowHb.AddChild(pLbl);
+
+            string roleTag = "◆ 야당";
+            Color rCol = ColorOpposition;
+            if (i == _declarerIdx)
             {
-                Text = $"{PlayerNames[i]} [{roleTag}] : 이번 판 {diffStr}점  (누적 {_totalScores[i]}점)",
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
-            _modalVbox.AddChild(row);
+                roleTag = "★ 여당(주공)";
+                rCol = ColorRulingMain;
+            }
+            else if (i == _friendPlayerIdx)
+            {
+                roleTag = "★ 여당(프렌드)";
+                rCol = ColorRulingFriend;
+            }
+
+            var rLbl = new Label { Text = $"[{roleTag}]" };
+            rLbl.AddThemeColorOverride("font_color", rCol);
+            rowHb.AddChild(rLbl);
+
+            string diffStr = scoreChanges[i] >= 0 ? $"+{scoreChanges[i]}" : scoreChanges[i].ToString();
+            var scLbl = new Label { Text = $": 이번 판 {diffStr}점  (누적 {_totalScores[i]}점)" };
+            rowHb.AddChild(scLbl);
         }
 
         var nextBtn = new Button { Text = "다음 판 시작하기" };
@@ -1247,23 +1424,91 @@ public partial class Main : Control
             HorizontalAlignment = HorizontalAlignment.Center
         };
         who.AddThemeFontSizeOverride("font_size", 13);
+        who.AddThemeColorOverride("font_color", PlayerColors[playerIdx]);
         slot.AddChild(who);
 
         var cv = new CardView();
         slot.AddChild(cv);
-        cv.Setup(card, _trumpSuit, true);
+        cv.Setup(card, _trumpSuit, true, false);
         cv.SetLegal(false);
     }
 
     private void HighlightActiveSeat(int activeIdx)
     {
+        _activeSeatIdx = activeIdx;
+        UpdateSeatStyles();
+    }
+
+    private void UpdateSeatStyles()
+    {
         for (int i = 0; i < 5; i++)
         {
-            var borderCol = i == activeIdx ? new Color(0.96f, 0.80f, 0.22f) : new Color(0.28f, 0.52f, 0.38f);
-            int bw = i == activeIdx ? 3 : 2;
+            var bgCol = new Color(0.07f, 0.16f, 0.12f, 0.92f);
+            var borderCol = new Color(0.28f, 0.52f, 0.38f);
+            if (_declarerIdx != -1)
+            {
+                if (i == _declarerIdx)
+                {
+                    bgCol = new Color(0.24f, 0.15f, 0.05f, 0.94f);
+                    borderCol = ColorRulingMain;
+                }
+                else if (_friendRevealed && i == _friendPlayerIdx)
+                {
+                    bgCol = new Color(0.22f, 0.13f, 0.06f, 0.94f);
+                    borderCol = ColorRulingFriend;
+                }
+                else if (_friendRevealed)
+                {
+                    bgCol = new Color(0.05f, 0.14f, 0.23f, 0.94f);
+                    borderCol = ColorOpposition;
+                }
+            }
+
+            int bw = 2;
+            if (i == _activeSeatIdx)
+            {
+                borderCol = new Color(1.0f, 0.96f, 0.42f);
+                bw = 3;
+            }
+
             _playerSeatPanels[i].AddThemeStyleboxOverride(
                 "panel",
-                MakePanelStyle(new Color(0.07f, 0.16f, 0.12f, 0.92f), borderCol, 10, bw));
+                MakePanelStyle(bgCol, borderCol, 10, bw));
+        }
+    }
+
+    private void RenderCapturedSolitaire(int playerIdx)
+    {
+        var box = _playerCapturedBoxes[playerIdx];
+        foreach (Node child in box.GetChildren())
+            child.QueueFree();
+
+        var cards = _capturedPoints[playerIdx];
+        if (cards.Count == 0)
+        {
+            var emptyLbl = new Label
+            {
+                Text = "획득 점수패 없음",
+                Position = new Vector2(2, 16)
+            };
+            emptyLbl.AddThemeFontSizeOverride("font_size", 11);
+            emptyLbl.AddThemeColorOverride("font_color", new Color(0.58f, 0.68f, 0.62f));
+            box.AddChild(emptyLbl);
+            return;
+        }
+
+        int count = cards.Count;
+        float maxSpan = 196.0f;
+        float stepX = count > 1 ? Math.Min(20.0f, maxSpan / (count - 1)) : 20.0f;
+
+        for (int idx = 0; idx < count; idx++)
+        {
+            var cv = new CardView();
+            box.AddChild(cv);
+            cv.Setup(cards[idx], _trumpSuit, false, true);
+            cv.SetLegal(false);
+            cv.Position = new Vector2(idx * stepX, 1.0f);
+            cv.Size = new Vector2(40, 54);
         }
     }
 
@@ -1287,6 +1532,9 @@ public partial class Main : Control
                 break;
         }
 
+        if (_playedCardsBtn != null)
+            _playedCardsBtn.Text = $"나온 카드 보기 ({_playedCardsHistory.Count}장)";
+
         if (_declarerIdx == -1)
         {
             _contractInfoLabel.Text = "공약: 경매 중 | 주공: 미정 | 프렌드: 미정";
@@ -1299,7 +1547,7 @@ public partial class Main : Control
             else if (_phase == Phase.Playing && _friendSpec.Type != FriendType.None)
                 fStatus += " (정체 숨김)";
 
-            _contractInfoLabel.Text = $"공약: {MightyRules.GetSuitName(_trumpSuit)} {_contractScore}점 | 주공: {PlayerNames[_declarerIdx]} | 프렌드: {fStatus}";
+            _contractInfoLabel.Text = $"공약: {MightyRules.GetSuitName(_trumpSuit)} {_contractScore}점 | ★주공: {PlayerNames[_declarerIdx]} | ★프렌드: {fStatus}";
         }
 
         int knownRuling = 0;
@@ -1312,25 +1560,44 @@ public partial class Main : Control
             else
                 knownDef += pts;
         }
-        _teamScoreLabel.Text = $"여당(공개): {knownRuling} / {_contractScore}점 | 기타 획득: {knownDef}점";
+        _teamScoreLabel.Text = $"★여당(공개): {knownRuling}/{_contractScore}점 | ◆야당/기타: {knownDef}점";
 
         for (int i = 0; i < 5; i++)
         {
             string roleTxt = "경매 중";
+            Color roleCol = ColorUnknownRole;
             if (_declarerIdx != -1)
             {
-                if (i == _declarerIdx) roleTxt = "★ 주공";
-                else if (_friendRevealed && i == _friendPlayerIdx) roleTxt = "◆ 프렌드";
-                else if (_friendRevealed) roleTxt = "🛡️ 야당";
-                else roleTxt = "❓ 미상";
+                if (i == _declarerIdx)
+                {
+                    roleTxt = "★ 여당 [주공]";
+                    roleCol = ColorRulingMain;
+                }
+                else if (_friendRevealed && i == _friendPlayerIdx)
+                {
+                    roleTxt = "★ 여당 [프렌드]";
+                    roleCol = ColorRulingFriend;
+                }
+                else if (_friendRevealed)
+                {
+                    roleTxt = "◆ 야당 [수비]";
+                    roleCol = ColorOpposition;
+                }
+                else
+                {
+                    roleTxt = "? [정체 미상]";
+                    roleCol = ColorUnknownRole;
+                }
             }
             _playerRoleLabels[i].Text = roleTxt;
-            _playerCardCountLabels[i].Text = $"남은 패: {_hands[i].Count}장 | 누적: {_totalScores[i]}점";
+            _playerRoleLabels[i].AddThemeColorOverride("font_color", roleCol);
 
-            var capNames = _capturedPoints[i].Select(MightyRules.GetCardShortName).ToList();
-            _playerCapturedLabels[i].Text = $"획득({capNames.Count}점): {(capNames.Count > 0 ? string.Join(" ", capNames) : "없음")}";
+            int ptsI = MightyRules.CountPointCards(_capturedPoints[i]);
+            _playerCardCountLabels[i].Text = $"남은 패: {_hands[i].Count}장 | 획득: {ptsI}점 | 누적: {_totalScores[i]}점";
+            RenderCapturedSolitaire(i);
         }
 
+        UpdateSeatStyles();
         RenderHumanHand();
     }
 
@@ -1350,7 +1617,7 @@ public partial class Main : Control
         {
             var cv = new CardView();
             _handContainer.AddChild(cv);
-            cv.Setup(card, displayTrump, false);
+            cv.Setup(card, displayTrump, false, false);
 
             if (_phase == Phase.KittyExchange && _declarerIdx == 0)
             {
