@@ -864,20 +864,16 @@ public partial class Main : Control
         foreach (var s in new[] { Suit.Spade, Suit.Diamond, Suit.Heart, Suit.Club, Suit.None })
         {
             Suit capturedSuit = s;
-            var b = new Button
-            {
-                Text = MightyRules.GetSuitName(capturedSuit),
-                ToggleMode = true,
-                ButtonPressed = _selectedBidSuit == capturedSuit
-            };
-            b.Pressed += () =>
+            var tile = new CardView();
+            suitHb.AddChild(tile);
+            tile.SetupSuitTile(capturedSuit, "", _selectedBidSuit == capturedSuit);
+            tile.Pressed += () =>
             {
                 _selectedBidSuit = capturedSuit;
                 MightyRules.SortHand(_hands[0], _selectedBidSuit);
                 RenderHumanHand();
                 ShowHumanBiddingModal(gen);
             };
-            suitHb.AddChild(b);
         }
 
         var scoreHb = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
@@ -1555,6 +1551,8 @@ public partial class Main : Control
         }
     }
 
+    private bool IsFriendKnownOnScreen() => _friendRevealed || _friendPlayerIdx == 0;
+
     private void RenderTrickSlot(int slotIdx, int playerIdx, CardData card)
     {
         if (slotIdx < 0 || slotIdx >= _trickSlots.Count) return;
@@ -1562,6 +1560,7 @@ public partial class Main : Control
         foreach (Node c in slot.GetChildren())
             c.QueueFree();
 
+        bool knownF = IsFriendKnownOnScreen();
         string roleTxt = "? 미상";
         Color roleCol = ColorUnknownRole;
         var tagBg = new Color(0.07f, 0.16f, 0.12f, 0.92f);
@@ -1576,7 +1575,7 @@ public partial class Main : Control
             tagBorder = ColorRulingMain;
             tagBw = 2;
         }
-        else if (_friendRevealed && playerIdx == _friendPlayerIdx)
+        else if (knownF && playerIdx == _friendPlayerIdx)
         {
             roleTxt = "★ 여당[프렌드]";
             roleCol = ColorRulingFriend;
@@ -1584,7 +1583,7 @@ public partial class Main : Control
             tagBorder = ColorRulingFriend;
             tagBw = 2;
         }
-        else if (_friendRevealed)
+        else if (knownF)
         {
             roleTxt = "◆ 야당";
             roleCol = ColorOpposition;
@@ -1634,6 +1633,7 @@ public partial class Main : Control
 
     private void UpdateSeatStyles()
     {
+        bool knownF = IsFriendKnownOnScreen();
         for (int i = 0; i < 5; i++)
         {
             var bgCol = new Color(0.07f, 0.16f, 0.12f, 0.92f);
@@ -1645,12 +1645,12 @@ public partial class Main : Control
                     bgCol = new Color(0.24f, 0.15f, 0.05f, 0.94f);
                     borderCol = ColorRulingMain;
                 }
-                else if (_friendRevealed && i == _friendPlayerIdx)
+                else if (knownF && i == _friendPlayerIdx)
                 {
                     bgCol = new Color(0.22f, 0.13f, 0.06f, 0.94f);
                     borderCol = ColorRulingFriend;
                 }
-                else if (_friendRevealed)
+                else if (knownF)
                 {
                     bgCol = new Color(0.05f, 0.14f, 0.23f, 0.94f);
                     borderCol = ColorOpposition;
@@ -1728,6 +1728,7 @@ public partial class Main : Control
         if (_playedCardsBtn != null)
             _playedCardsBtn.Text = $"나온 카드 보기 ({_playedCardsHistory.Count}장)";
 
+        bool knownF = IsFriendKnownOnScreen();
         if (_declarerIdx == -1)
         {
             _contractInfoLabel.Text = "공약: 경매 중 | 주공: 미정 | 프렌드: 미정";
@@ -1735,7 +1736,7 @@ public partial class Main : Control
         else
         {
             string fStatus = _friendSpec.Label;
-            if (_friendRevealed && _friendPlayerIdx != -1)
+            if (knownF && _friendPlayerIdx != -1)
                 fStatus += $" ({PlayerNames[_friendPlayerIdx]})";
             else if (_phase == Phase.Playing && _friendSpec.Type != FriendType.None)
                 fStatus += " (정체 숨김)";
@@ -1748,7 +1749,7 @@ public partial class Main : Control
         for (int i = 0; i < 5; i++)
         {
             int pts = MightyRules.CountPointCards(_capturedPoints[i]);
-            if (i == _declarerIdx || (_friendRevealed && i == _friendPlayerIdx))
+            if (i == _declarerIdx || (knownF && i == _friendPlayerIdx))
                 knownRuling += pts;
             else
                 knownDef += pts;
@@ -1766,12 +1767,12 @@ public partial class Main : Control
                     roleTxt = "★ 여당 [주공]";
                     roleCol = ColorRulingMain;
                 }
-                else if (_friendRevealed && i == _friendPlayerIdx)
+                else if (knownF && i == _friendPlayerIdx)
                 {
                     roleTxt = "★ 여당 [프렌드]";
                     roleCol = ColorRulingFriend;
                 }
-                else if (_friendRevealed)
+                else if (knownF)
                 {
                     roleTxt = "◆ 야당 [수비]";
                     roleCol = ColorOpposition;
@@ -1786,7 +1787,7 @@ public partial class Main : Control
             _playerRoleLabels[i].AddThemeColorOverride("font_color", roleCol);
 
             int ptsI = MightyRules.CountPointCards(_capturedPoints[i]);
-            _playerCardCountLabels[i].Text = $"남은 패: {_hands[i].Count}장 | 획득: {ptsI}점 | 누적: {_totalScores[i]}점";
+            _playerCardCountLabels[i].Text = $"🃏 {_hands[i].Count}장  |  ★ {ptsI}점  |  누적 {_totalScores[i]}점";
             RenderCapturedSolitaire(i);
         }
 
@@ -1806,11 +1807,14 @@ public partial class Main : Control
             legalIds = _hands[0].Select(c => c.Id).ToHashSet();
 
         Suit displayTrump = _declarerIdx != -1 ? _trumpSuit : _selectedBidSuit;
+        string friendCid = _friendSpec.Type == FriendType.Card ? _friendSpec.CardId : "";
         foreach (var card in _hands[0])
         {
             var cv = new CardView();
             _handContainer.AddChild(cv);
             cv.Setup(card, displayTrump, false, false);
+            if (!string.IsNullOrEmpty(friendCid) && card.Id == friendCid && _declarerIdx != 0)
+                cv.SetFriendCard(true);
 
             if (_phase == Phase.KittyExchange && _declarerIdx == 0)
             {

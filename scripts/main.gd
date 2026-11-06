@@ -10,7 +10,7 @@ enum Phase {
 	ROUND_OVER
 }
 
-const PLAYER_NAMES: Array[String] = ["나 (플레이어)", "AI 민수", "AI 지영", "AI 현우", "AI 수진"]
+const PLAYER_NAMES: Array[String] = ["나", "AI 민수", "AI 지영", "AI 현우", "AI 수진"]
 const PLAYER_COLORS: Array[Color] = [
 	Color(0.48, 0.98, 0.64),
 	Color(0.45, 0.84, 1.00),
@@ -67,8 +67,8 @@ var active_seat_idx: int = -1
 var suit_regex: RegEx
 
 var top_status_label: Label
-var contract_info_label: RichTextLabel
-var team_score_label: Label
+var hud_contract_box: HBoxContainer
+var hud_score_gauge: Control
 var played_cards_btn: Button
 var sfx_toggle_btn: Button
 var sfx_enabled: bool = true
@@ -79,7 +79,7 @@ var log_label: RichTextLabel
 var player_seat_panels: Array[PanelContainer] = []
 var player_name_labels: Array[Label] = []
 var player_role_labels: Array[Label] = []
-var player_card_count_labels: Array[Label] = []
+var player_stat_bars: Array[Control] = []
 var player_captured_boxes: Array[Control] = []
 var player_bubble_labels: Array[RichTextLabel] = []
 
@@ -102,6 +102,9 @@ func _ready() -> void:
 	_init_sfx_system()
 	_build_ui()
 	start_new_round()
+
+func _is_friend_known_on_screen() -> bool:
+	return friend_revealed or friend_player_idx == 0
 
 func _init_sfx_system() -> void:
 	for i in range(4):
@@ -183,12 +186,7 @@ func _synth_wav(segments: Array) -> AudioStreamWAV:
 		var n_samples := int(dur * float(mix_rate))
 		for s in range(n_samples):
 			var t := float(s) / float(maxi(1, n_samples))
-			var env := 1.0
-			if t < 0.08:
-				env = t / 0.08
-			else:
-				env = pow(1.0 - ((t - 0.08) / 0.92), 1.45)
-
+			var env := (t / 0.08) if t < 0.08 else pow(1.0 - ((t - 0.08) / 0.92), 1.45)
 			var freq := lerpf(f0, f1, t)
 			var tone := 0.0
 			if freq > 1.0:
@@ -265,7 +263,7 @@ func _colorize_suits(raw_text: String) -> String:
 	out += raw_text.substr(last_idx)
 	return out
 
-func _create_rich_label(font_sz: int, min_h: float = 24.0) -> RichTextLabel:
+func _create_rich_label(font_sz: int, min_h: float = 22.0) -> RichTextLabel:
 	var rtl := RichTextLabel.new()
 	rtl.bbcode_enabled = true
 	rtl.fit_content = true
@@ -296,11 +294,11 @@ func _style_suit_button(btn: Button, suit: int, is_selected: bool = false) -> vo
 		fg = Color(0.12, 0.36, 0.24)
 
 	var bg := Color(1.0, 0.94, 0.74) if is_selected else CARD_BG_IVORY
-	var border := Color(0.95, 0.58, 0.12) if is_selected else Color(0.32, 0.36, 0.40)
+	var border := Color(0.14, 0.78, 0.40) if is_selected else Color(0.32, 0.36, 0.40)
 	var bw := 3 if is_selected else 2
 
 	var sb_normal := _make_panel_style(bg, border, 8, bw)
-	var sb_hover := _make_panel_style(bg.lightened(0.04), Color(0.95, 0.68, 0.18), 8, bw)
+	var sb_hover := _make_panel_style(bg.lightened(0.04), Color(0.14, 0.78, 0.40), 8, bw)
 	btn.add_theme_stylebox_override("normal", sb_normal)
 	btn.add_theme_stylebox_override("hover", sb_hover)
 	btn.add_theme_stylebox_override("pressed", sb_normal)
@@ -322,9 +320,72 @@ func _make_panel_style(bg: Color, border: Color, radius: int = 10, border_w: int
 	sb.content_margin_bottom = 6
 	return sb
 
+func _draw_player_stat_bar(ctrl: Control, player_idx: int) -> void:
+	var font: Font = get_theme_default_font()
+	var hand_cnt: int = hands[player_idx].size()
+	var cap_pts: int = Rules.count_point_cards(captured_points[player_idx])
+	var tot_sc: int = total_scores[player_idx]
+
+	# 1. 미니 카드 뒷면 스택 아이콘 + 남은 장수
+	var stack_n := mini(hand_cnt, 5)
+	for k in range(stack_n):
+		var r_back := Rect2(Vector2(2.0 + float(k) * 3.5, 3.0), Vector2(16, 22))
+		ctrl.draw_rect(r_back, Color(0.16, 0.36, 0.72), true)
+		ctrl.draw_rect(r_back, Color(0.85, 0.92, 1.0), false, 1.0)
+	if hand_cnt == 0:
+		var r_empty := Rect2(Vector2(2.0, 3.0), Vector2(16, 22))
+		ctrl.draw_rect(r_empty, Color(0.25, 0.35, 0.30, 0.5), false, 1.0)
+	ctrl.draw_string(font, Vector2(36, 19), "×%d" % hand_cnt, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.90, 0.96, 0.92))
+
+	# 2. 이번 판 획득 점수 배지 (★ N)
+	var pt_rect := Rect2(Vector2(82, 3), Vector2(68, 22))
+	ctrl.draw_rect(pt_rect, Color(0.22, 0.16, 0.05, 0.9), true)
+	ctrl.draw_rect(pt_rect, Color(0.88, 0.68, 0.18), false, 1.0)
+	ctrl.draw_string(font, Vector2(82, 19), "★ %d점" % cap_pts, HORIZONTAL_ALIGNMENT_CENTER, 68, 12, Color(1.0, 0.88, 0.36))
+
+	# 3. 누적 점수 배지
+	var sc_rect := Rect2(Vector2(158, 3), Vector2(80, 22))
+	var sc_col := Color(0.55, 0.96, 0.68) if tot_sc >= 0 else Color(1.0, 0.58, 0.58)
+	var sc_str := "+%d" % tot_sc if tot_sc >= 0 else str(tot_sc)
+	ctrl.draw_rect(sc_rect, Color(0.05, 0.12, 0.10, 0.9), true)
+	ctrl.draw_rect(sc_rect, Color(0.28, 0.48, 0.38), false, 1.0)
+	ctrl.draw_string(font, Vector2(158, 19), "누적 %s" % sc_str, HORIZONTAL_ALIGNMENT_CENTER, 80, 12, sc_col)
+
+func _draw_hud_score_gauge(ctrl: Control) -> void:
+	var font: Font = get_theme_default_font()
+	var w := ctrl.size.x
+	var h := ctrl.size.y
+	var rect := Rect2(Vector2(0, 3), Vector2(w, h - 6))
+	ctrl.draw_rect(rect, Color(0.06, 0.12, 0.10, 0.95), true)
+
+	var known_f := _is_friend_known_on_screen()
+	var known_ruling := 0
+	var known_def := 0
+	for i in range(5):
+		var pts := Rules.count_point_cards(captured_points[i])
+		if i == declarer_idx or (known_f and i == friend_player_idx):
+			known_ruling += pts
+		else:
+			known_def += pts
+
+	var r_w := clampf(float(known_ruling) / 20.0, 0.0, 1.0) * w
+	var d_w := clampf(float(known_def) / 20.0, 0.0, 1.0) * w
+	if r_w > 0:
+		ctrl.draw_rect(Rect2(Vector2(0, 3), Vector2(r_w, h - 6)), Color(0.85, 0.62, 0.12, 0.85), true)
+	if d_w > 0:
+		ctrl.draw_rect(Rect2(Vector2(w - d_w, 3), Vector2(d_w, h - 6)), Color(0.18, 0.58, 0.85, 0.85), true)
+
+	# 목표 점수 마커 라인
+	var goal_x := clampf(float(contract_score) / 20.0, 0.0, 1.0) * w
+	ctrl.draw_line(Vector2(goal_x, 1), Vector2(goal_x, h - 1), Color(1.0, 0.32, 0.32), 2.5)
+
+	ctrl.draw_rect(rect, Color(0.42, 0.65, 0.52), false, 1.5)
+	ctrl.draw_string(font, Vector2(8, h * 0.68), "★여당 %d/%d" % [known_ruling, contract_score], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.95, 0.75))
+	ctrl.draw_string(font, Vector2(0, h * 0.68), "◆야당 %d  " % known_def, HORIZONTAL_ALIGNMENT_RIGHT, w - 6, 12, Color(0.78, 0.94, 1.0))
+
 func _create_player_seat_panel(i: int) -> PanelContainer:
 	var seat := PanelContainer.new()
-	seat.custom_minimum_size = Vector2(262, 154)
+	seat.custom_minimum_size = Vector2(262, 152)
 	seat.add_theme_stylebox_override("panel", _make_panel_style(Color(0.07, 0.16, 0.12, 0.92), Color(0.28, 0.52, 0.38), 10, 2))
 
 	var sv := VBoxContainer.new()
@@ -349,19 +410,18 @@ func _create_player_seat_panel(i: int) -> PanelContainer:
 	header_hb.add_child(role_lbl)
 	player_role_labels.append(role_lbl)
 
-	var count_lbl := Label.new()
-	count_lbl.text = "남은 패: 10장 | 획득: 0점 | 누적: 0점"
-	count_lbl.add_theme_font_size_override("font_size", 12)
-	count_lbl.add_theme_color_override("font_color", Color(0.84, 0.92, 0.88))
-	sv.add_child(count_lbl)
-	player_card_count_labels.append(count_lbl)
+	var stat_bar := Control.new()
+	stat_bar.custom_minimum_size = Vector2(240, 26)
+	stat_bar.draw.connect(func() -> void: _draw_player_stat_bar(stat_bar, i))
+	sv.add_child(stat_bar)
+	player_stat_bars.append(stat_bar)
 
 	var cap_box := Control.new()
 	cap_box.custom_minimum_size = Vector2(240, 56)
 	sv.add_child(cap_box)
 	player_captured_boxes.append(cap_box)
 
-	var bubble_lbl := _create_rich_label(12, 22.0)
+	var bubble_lbl := _create_rich_label(12, 20.0)
 	sv.add_child(bubble_lbl)
 	player_bubble_labels.append(bubble_lbl)
 
@@ -383,17 +443,17 @@ func _build_ui() -> void:
 	main_vbox.add_child(top_bar)
 
 	var top_hbox := HBoxContainer.new()
-	top_hbox.add_theme_constant_override("separation", 14)
+	top_hbox.add_theme_constant_override("separation", 10)
 	top_bar.add_child(top_hbox)
 
 	var title_lbl := Label.new()
-	title_lbl.text = "♠ 마이티 (MIGHTY)"
-	title_lbl.add_theme_font_size_override("font_size", 19)
+	title_lbl.text = "♠ MIGHTY"
+	title_lbl.add_theme_font_size_override("font_size", 18)
 	title_lbl.add_theme_color_override("font_color", Color(0.98, 0.84, 0.28))
 	top_hbox.add_child(title_lbl)
 
 	top_status_label = Label.new()
-	top_status_label.text = "경매 준비 중"
+	top_status_label.text = "[경매]"
 	top_status_label.add_theme_font_size_override("font_size", 14)
 	top_status_label.add_theme_color_override("font_color", Color(0.85, 0.96, 0.90))
 	top_hbox.add_child(top_status_label)
@@ -401,19 +461,20 @@ func _build_ui() -> void:
 	var sep1 := VSeparator.new()
 	top_hbox.add_child(sep1)
 
-	contract_info_label = _create_rich_label(14, 24.0)
-	contract_info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_set_rich_text(contract_info_label, "공약: 미정 | 주공: 미정 | 프렌드: 미정", "#FFF2C6", false)
-	top_hbox.add_child(contract_info_label)
+	hud_contract_box = HBoxContainer.new()
+	hud_contract_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hud_contract_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	hud_contract_box.add_theme_constant_override("separation", 8)
+	top_hbox.add_child(hud_contract_box)
 
-	team_score_label = Label.new()
-	team_score_label.text = "★여당: 0점 | ◆야당: 0점"
-	team_score_label.add_theme_font_size_override("font_size", 14)
-	team_score_label.add_theme_color_override("font_color", COLOR_RULING_MAIN)
-	top_hbox.add_child(team_score_label)
+	hud_score_gauge = Control.new()
+	hud_score_gauge.custom_minimum_size = Vector2(210, 26)
+	hud_score_gauge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hud_score_gauge.draw.connect(func() -> void: _draw_hud_score_gauge(hud_score_gauge))
+	top_hbox.add_child(hud_score_gauge)
 
 	played_cards_btn = Button.new()
-	played_cards_btn.text = "나온 카드 보기 (0장)"
+	played_cards_btn.text = "🃏 기록(0)"
 	played_cards_btn.pressed.connect(func() -> void:
 		played_cards_panel.visible = not played_cards_panel.visible
 		if played_cards_panel.visible:
@@ -422,22 +483,22 @@ func _build_ui() -> void:
 	top_hbox.add_child(played_cards_btn)
 
 	sfx_toggle_btn = Button.new()
-	sfx_toggle_btn.text = "♪ 효과음: ON"
+	sfx_toggle_btn.text = "♪ ON"
 	sfx_toggle_btn.pressed.connect(func() -> void:
 		sfx_enabled = not sfx_enabled
-		sfx_toggle_btn.text = "♪ 효과음: ON" if sfx_enabled else "♪ 효과음: OFF"
+		sfx_toggle_btn.text = "♪ ON" if sfx_enabled else "♪ OFF"
 		if sfx_enabled:
 			_play_sfx("discard_click")
 	)
 	top_hbox.add_child(sfx_toggle_btn)
 
 	var help_btn := Button.new()
-	help_btn.text = "규칙 안내"
+	help_btn.text = "규칙"
 	help_btn.pressed.connect(func() -> void: help_panel.visible = not help_panel.visible)
 	top_hbox.add_child(help_btn)
 
 	var restart_btn := Button.new()
-	restart_btn.text = "새 판 시작"
+	restart_btn.text = "새 판"
 	restart_btn.pressed.connect(func() -> void: start_new_round())
 	top_hbox.add_child(restart_btn)
 
@@ -445,7 +506,6 @@ func _build_ui() -> void:
 	table_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main_vbox.add_child(table_area)
 
-	# AI 좌석 4개만 상단/중앙 테이블 영역에 좌2, 우2로 대칭 배치 (내 현황판 i=0은 하단 패널로 분리)
 	var ai_seat_anchors := {
 		1: Vector2(0.015, 0.52),
 		2: Vector2(0.015, 0.04),
@@ -456,7 +516,7 @@ func _build_ui() -> void:
 	player_seat_panels.clear()
 	player_name_labels.clear()
 	player_role_labels.clear()
-	player_card_count_labels.clear()
+	player_stat_bars.clear()
 	player_captured_boxes.clear()
 	player_bubble_labels.clear()
 
@@ -470,7 +530,7 @@ func _build_ui() -> void:
 			seat.anchor_right = anc.x
 			seat.anchor_bottom = anc.y
 			seat.offset_right = 262
-			seat.offset_bottom = 154
+			seat.offset_bottom = 152
 			table_area.add_child(seat)
 
 	var trick_board := PanelContainer.new()
@@ -482,14 +542,14 @@ func _build_ui() -> void:
 	table_area.add_child(trick_board)
 
 	var board_vbox := VBoxContainer.new()
-	board_vbox.add_theme_constant_override("separation", 8)
+	board_vbox.add_theme_constant_override("separation", 6)
 	trick_board.add_child(board_vbox)
 
-	trick_info_banner = _create_rich_label(16, 28.0)
-	_set_rich_text(trick_info_banner, "경매를 시작합니다", "#FFE899", true)
+	trick_info_banner = _create_rich_label(16, 26.0)
+	_set_rich_text(trick_info_banner, "경매 시작", "#FFE899", true)
 	board_vbox.add_child(trick_info_banner)
 
-	log_label = _create_rich_label(14, 24.0)
+	log_label = _create_rich_label(13, 20.0)
 	_set_rich_text(log_label, "", "#C7F2D9", true)
 	board_vbox.add_child(log_label)
 
@@ -508,19 +568,18 @@ func _build_ui() -> void:
 		trick_slots.append(slot_v)
 
 	center_modal = PanelContainer.new()
-	center_modal.anchor_left = 0.24
-	center_modal.anchor_right = 0.76
-	center_modal.anchor_top = 0.08
-	center_modal.anchor_bottom = 0.92
+	center_modal.anchor_left = 0.23
+	center_modal.anchor_right = 0.77
+	center_modal.anchor_top = 0.05
+	center_modal.anchor_bottom = 0.95
 	center_modal.add_theme_stylebox_override("panel", _make_panel_style(Color(0.08, 0.13, 0.16, 0.97), Color(0.88, 0.72, 0.24), 14, 2))
 	table_area.add_child(center_modal)
 
 	modal_vbox = VBoxContainer.new()
 	modal_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	modal_vbox.add_theme_constant_override("separation", 10)
+	modal_vbox.add_theme_constant_override("separation", 8)
 	center_modal.add_child(modal_vbox)
 
-	# 하단 영역: 좌측에 내 현황판(player_seat_panels[0]), 우측 옆에 내 손패 카드(hand_container) 배치
 	var bottom_panel := PanelContainer.new()
 	bottom_panel.custom_minimum_size = Vector2(0, 188)
 	bottom_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.10, 0.075, 0.98), Color(0.32, 0.62, 0.44), 0, 2))
@@ -546,7 +605,7 @@ func _build_ui() -> void:
 	hand_hint_label = Label.new()
 	hand_hint_label.text = "내 손패"
 	hand_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hand_hint_label.add_theme_font_size_override("font_size", 14)
+	hand_hint_label.add_theme_font_size_override("font_size", 13)
 	hand_hint_label.add_theme_color_override("font_color", Color(0.92, 0.96, 0.88))
 	bottom_vbox.add_child(hand_hint_label)
 
@@ -563,6 +622,60 @@ func _build_ui() -> void:
 
 	_build_played_cards_overlay()
 	_build_help_overlay()
+
+func _refresh_hud_contract_box() -> void:
+	if hud_contract_box == null:
+		return
+	for c in hud_contract_box.get_children():
+		c.queue_free()
+
+	if declarer_idx == -1:
+		var wait_lbl := Label.new()
+		wait_lbl.text = "경매 진행 중..."
+		wait_lbl.add_theme_font_size_override("font_size", 13)
+		wait_lbl.add_theme_color_override("font_color", Color(0.95, 0.90, 0.72))
+		hud_contract_box.add_child(wait_lbl)
+		return
+
+	# 1. 공약 배지
+	var bid_badge := PanelContainer.new()
+	bid_badge.add_theme_stylebox_override("panel", _make_panel_style(CARD_BG_IVORY, Color(0.88, 0.68, 0.18), 6, 2))
+	hud_contract_box.add_child(bid_badge)
+
+	var bid_lbl := _create_rich_label(13, 20.0)
+	_set_rich_text(bid_lbl, " %s %d점 " % [Rules.SUIT_NAMES[trump_suit], contract_score], "#161B22", true)
+	bid_badge.add_child(bid_lbl)
+
+	# 2. 주공 배지
+	var dec_badge := PanelContainer.new()
+	dec_badge.add_theme_stylebox_override("panel", _make_panel_style(Color(0.24, 0.15, 0.05, 0.95), COLOR_RULING_MAIN, 6, 1))
+	hud_contract_box.add_child(dec_badge)
+
+	var dec_lbl := Label.new()
+	dec_lbl.text = " ★주공: %s " % PLAYER_NAMES[declarer_idx].replace(" (플레이어)", "")
+	dec_lbl.add_theme_font_size_override("font_size", 13)
+	dec_lbl.add_theme_color_override("font_color", COLOR_RULING_MAIN)
+	dec_badge.add_child(dec_lbl)
+
+	# 3. 프렌드 배지
+	var known_f := _is_friend_known_on_screen()
+	var fr_badge := PanelContainer.new()
+	fr_badge.add_theme_stylebox_override("panel", _make_panel_style(
+		Color(0.22, 0.13, 0.06, 0.95) if known_f else Color(0.08, 0.16, 0.14, 0.95),
+		COLOR_RULING_FRIEND if known_f else Color(0.35, 0.55, 0.45),
+		6, 1
+	))
+	hud_contract_box.add_child(fr_badge)
+
+	var f_txt: String = str(friend_spec["label"]).replace(" 프렌드", "")
+	if known_f and friend_player_idx != -1:
+		f_txt += " → %s" % PLAYER_NAMES[friend_player_idx].replace(" (플레이어)", "")
+	elif not known_f and str(friend_spec["type"]) != "none":
+		f_txt += " [?]"
+
+	var fr_lbl := _create_rich_label(13, 20.0)
+	_set_rich_text(fr_lbl, " ★프렌드: %s " % f_txt, "#FFB547" if known_f else "#B8D8C8", true)
+	fr_badge.add_child(fr_lbl)
 
 func _build_played_cards_overlay() -> void:
 	played_cards_panel = PanelContainer.new()
@@ -588,17 +701,11 @@ func _refresh_played_cards_modal() -> void:
 	played_cards_vbox.add_child(header_hb)
 
 	var title := Label.new()
-	title.text = "♠ 이미 나온 카드 기록 (총 %d장)" % played_cards_history.size()
+	title.text = "🃏 이미 나온 카드 (%d장)" % played_cards_history.size()
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 19)
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.32))
 	header_hb.add_child(title)
-
-	var sub_lbl := Label.new()
-	sub_lbl.text = "문양별 카드와 낸 플레이어(라운드)가 표시됩니다"
-	sub_lbl.add_theme_font_size_override("font_size", 13)
-	sub_lbl.add_theme_color_override("font_color", Color(0.75, 0.88, 0.82))
-	header_hb.add_child(sub_lbl)
 
 	var suits_order := [Rules.SUIT_SPADE, Rules.SUIT_DIAMOND, Rules.SUIT_HEART, Rules.SUIT_CLUB, Rules.SUIT_JOKER]
 	for s in suits_order:
@@ -621,13 +728,13 @@ func _refresh_played_cards_modal() -> void:
 		)
 
 		var suit_badge := PanelContainer.new()
-		suit_badge.custom_minimum_size = Vector2(142, 34)
+		suit_badge.custom_minimum_size = Vector2(138, 34)
 		suit_badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		suit_badge.add_theme_stylebox_override("panel", _make_panel_style(CARD_BG_IVORY, Color(0.30, 0.34, 0.38), 6, 1))
 		row_hb.add_child(suit_badge)
 
 		var s_lbl := Label.new()
-		s_lbl.text = "%s (%d장)" % [str(Rules.SUIT_NAMES[s]), suit_items.size()]
+		s_lbl.text = "%s (%d)" % [str(Rules.SUIT_NAMES[s]), suit_items.size()]
 		s_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		s_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		s_lbl.add_theme_font_size_override("font_size", 14)
@@ -641,8 +748,8 @@ func _refresh_played_cards_modal() -> void:
 
 		if suit_items.is_empty():
 			var empty_lbl := Label.new()
-			empty_lbl.text = "아직 나온 카드 없음"
-			empty_lbl.add_theme_font_size_override("font_size", 13)
+			empty_lbl.text = "-"
+			empty_lbl.add_theme_font_size_override("font_size", 14)
 			empty_lbl.add_theme_color_override("font_color", Color(0.52, 0.62, 0.58))
 			row_hb.add_child(empty_lbl)
 		else:
@@ -694,7 +801,7 @@ func _build_help_overlay() -> void:
 	help_panel.add_child(hv)
 
 	var htitle := Label.new()
-	htitle.text = "★ 마이티(Mighty) 핵심 규칙 안내"
+	htitle.text = "★ 마이티(Mighty) 핵심 규칙 요약"
 	htitle.add_theme_font_size_override("font_size", 20)
 	htitle.add_theme_color_override("font_color", Color(0.98, 0.84, 0.28))
 	hv.add_child(htitle)
@@ -704,14 +811,12 @@ func _build_help_overlay() -> void:
 	hbody.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_set_rich_text(
 		hbody,
-		"1. 인원 및 구성: 5명이 53장(조커 포함)으로 플레이합니다. 각 10장씩 배분하고 3장은 바닥패로 남깁니다.\n\n" +
-		"2. 경매(공약): 최소 13점부터 기루다(으뜸패) 문양과 목표 점수를 선언합니다. 최고 점수를 부른 사람이 '주공(대통령)'이 됩니다.\n\n" +
-		"3. 바닥패 교환 & 프렌드 지정: 주공은 바닥패 3장을 가져와 13장 중 3장을 버리고, 함께 팀(여당)이 될 '프렌드' 카드를 지정합니다.\n" +
-		"   - 여당(주공·프렌드)은 따뜻한 황금색/주황색, 야당(수비팀)은 시원한 하늘색으로 구분됩니다.\n\n" +
-		"4. 특수 카드 서열: 마이티(♠A, 단 스페이드가 기루다면 ◆A) > 조커 ★ > 기루다(A~2) > 선공 문양(A~2)\n" +
-		"   - 초구(1라운드)에는 기루다 선공이 불가하며, 초구와 막구(10라운드)에는 조커의 효력이 없습니다.\n" +
-		"   - 조커 콜(♣3, 클로버가 기루다면 ♠3)로 선공하면 조커 보유자는 반드시 조커를 내야 합니다.\n\n" +
-		"5. 승리 조건: 점수 카드(A, K, Q, J, 10 - 총 20점)를 여당(주공+프렌드)이 공약 점수 이상 획득하면 여당 승리, 못 미치면 야당(3명)이 승리합니다!",
+		"• 5인 53장(조커 포함): 각 10장 배분 + 바닥패 3장\n\n" +
+		"• 경매(13~20점): 으뜸패(기루다)와 목표 점수를 선언해 최고점자가 ★주공 당선\n\n" +
+		"• 바닥패 & 프렌드: 주공은 바닥패 3장을 가져와 3장을 버리고 함께할 ★프렌드 카드를 지정\n" +
+		"  (내가 프렌드 카드를 들고 있으면 즉시 모든 팀이 공개됩니다!)\n\n" +
+		"• 카드 서열: 마이티(♠A, 스페이드 기루다 시 ◆A) > 조커 ★ > 기루다 > 선공 문양\n\n" +
+		"• 점수 카드(A·K·Q·J·10, 총 20점): ★여당(주공+프렌드)이 목표 점수 이상 획득 시 승리!",
 		"#E8F4EE",
 		false
 	)
@@ -760,7 +865,7 @@ func start_new_round() -> void:
 	_clear_trick_slots()
 	_refresh_all_ui()
 	_play_sfx("deal")
-	_set_rich_text(log_label, "카드가 배분되었습니다. 경매를 시작합니다!", "#C7F2D9", true)
+	_set_rich_text(log_label, "새 라운드 배분 완료!", "#C7F2D9", true)
 	_process_bidding_turn(gen)
 
 func _process_bidding_turn(gen: int) -> void:
@@ -776,7 +881,7 @@ func _process_bidding_turn(gen: int) -> void:
 			last_active = i
 
 	if active_count == 0:
-		_set_rich_text(log_label, "모두 패스하여 새 판을 배분합니다.", "#C7F2D9", true)
+		_set_rich_text(log_label, "전원 패스 — 재배분합니다.", "#C7F2D9", true)
 		await get_tree().create_timer(1.0).timeout
 		if gen == round_generation:
 			start_new_round()
@@ -800,7 +905,7 @@ func _process_bidding_turn(gen: int) -> void:
 	else:
 		waiting_for_human = false
 		center_modal.visible = false
-		_set_rich_text(trick_info_banner, "%s님이 공약을 고민 중입니다..." % PLAYER_NAMES[current_bidder], "#FFE899", true)
+		_set_rich_text(trick_info_banner, "%s 경매 고민 중..." % PLAYER_NAMES[current_bidder], "#FFE899", true)
 		await get_tree().create_timer(0.55).timeout
 		if gen != round_generation:
 			return
@@ -810,8 +915,8 @@ func _process_bidding_turn(gen: int) -> void:
 			highest_bid = int(decision["contract"])
 			highest_bid_suit = int(decision["suit"])
 			declarer_idx = current_bidder
-			_set_rich_text(player_bubble_labels[current_bidder], "선언: %s %d점" % [Rules.SUIT_NAMES[highest_bid_suit], highest_bid], "#A6FAC8", false)
-			_set_rich_text(log_label, "%s님이 [%s %d점] 공약을 선언했습니다!" % [
+			_set_rich_text(player_bubble_labels[current_bidder], "📢 %s %d" % [Rules.SUIT_NAMES[highest_bid_suit], highest_bid], "#A6FAC8", false)
+			_set_rich_text(log_label, "%s → [%s %d점]" % [
 				PLAYER_NAMES[current_bidder],
 				Rules.SUIT_NAMES[highest_bid_suit],
 				highest_bid
@@ -824,8 +929,8 @@ func _process_bidding_turn(gen: int) -> void:
 		else:
 			_play_sfx("pass")
 			passed_players[current_bidder] = true
-			_set_rich_text(player_bubble_labels[current_bidder], "패스 (Pass)", "#A6FAC8", false)
-			_set_rich_text(log_label, "%s님이 패스했습니다." % PLAYER_NAMES[current_bidder], "#C7F2D9", true)
+			_set_rich_text(player_bubble_labels[current_bidder], "패스", "#A6FAC8", false)
+			_set_rich_text(log_label, "%s 패스" % PLAYER_NAMES[current_bidder], "#C7F2D9", true)
 
 		current_bidder = (current_bidder + 1) % 5
 		_process_bidding_turn(gen)
@@ -840,49 +945,55 @@ func _show_human_bidding_modal(gen: int) -> void:
 		selected_bid_score = min_bid
 
 	var title := Label.new()
-	title.text = "★ 경매 (공약 선언)"
+	title.text = "★ 경매 공약 선택"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_font_size_override("font_size", 19)
 	title.add_theme_color_override("font_color", Color(0.98, 0.84, 0.28))
 	modal_vbox.add_child(title)
 
-	var cur_lbl := _create_rich_label(15, 26.0)
+	var cur_lbl := _create_rich_label(14, 22.0)
 	if highest_bid >= 13:
-		_set_rich_text(cur_lbl, "현재 최고 공약: %s (%s %d점)" % [
+		_set_rich_text(cur_lbl, "현재 최고: %s [%s %d점]" % [
 			PLAYER_NAMES[declarer_idx],
 			Rules.SUIT_NAMES[highest_bid_suit],
 			highest_bid
 		], "#EAF6F0", true)
 	else:
-		_set_rich_text(cur_lbl, "현재 선언된 공약 없음 (최소 13점부터 가능)", "#EAF6F0", true)
+		_set_rich_text(cur_lbl, "첫 공약 선언 (최소 13점)", "#EAF6F0", true)
 	modal_vbox.add_child(cur_lbl)
 
+	# 5개의 시각적 문양 카드 타일 (스페이드, 다이아, 하트, 클로버, 노기루)
 	var suit_hb := HBoxContainer.new()
 	suit_hb.alignment = BoxContainer.ALIGNMENT_CENTER
-	suit_hb.add_theme_constant_override("separation", 8)
+	suit_hb.add_theme_constant_override("separation", 10)
 	modal_vbox.add_child(suit_hb)
 
+	var tile_titles := {
+		Rules.SUIT_SPADE: "스페이드",
+		Rules.SUIT_DIAMOND: "다이아",
+		Rules.SUIT_HEART: "하트",
+		Rules.SUIT_CLUB: "클로버",
+		Rules.SUIT_NONE: "노기루"
+	}
 	for s in [Rules.SUIT_SPADE, Rules.SUIT_DIAMOND, Rules.SUIT_HEART, Rules.SUIT_CLUB, Rules.SUIT_NONE]:
-		var b := Button.new()
-		b.text = str(Rules.SUIT_NAMES[s])
-		b.toggle_mode = true
-		b.button_pressed = (selected_bid_suit == s)
-		_style_suit_button(b, s, selected_bid_suit == s)
-		b.pressed.connect(func() -> void:
+		var tile := Button.new()
+		tile.set_script(CardViewScript)
+		suit_hb.add_child(tile)
+		tile.setup_suit_tile(s, str(tile_titles[s]), selected_bid_suit == s)
+		tile.pressed.connect(func() -> void:
 			selected_bid_suit = s
 			Rules.sort_hand(hands[0], selected_bid_suit)
 			_render_human_hand()
 			_show_human_bidding_modal(gen)
 		)
-		suit_hb.add_child(b)
 
 	var score_hb := HBoxContainer.new()
 	score_hb.alignment = BoxContainer.ALIGNMENT_CENTER
-	score_hb.add_theme_constant_override("separation", 12)
+	score_hb.add_theme_constant_override("separation", 14)
 	modal_vbox.add_child(score_hb)
 
 	var minus_btn := Button.new()
-	minus_btn.text = "-1점"
+	minus_btn.text = " −1 "
 	minus_btn.disabled = (selected_bid_score <= min_bid)
 	minus_btn.pressed.connect(func() -> void:
 		selected_bid_score = maxi(min_bid, selected_bid_score - 1)
@@ -891,13 +1002,13 @@ func _show_human_bidding_modal(gen: int) -> void:
 	score_hb.add_child(minus_btn)
 
 	var score_val := Label.new()
-	score_val.text = "목표 공약: %d점" % selected_bid_score
-	score_val.add_theme_font_size_override("font_size", 18)
+	score_val.text = "🎯 %d점" % selected_bid_score
+	score_val.add_theme_font_size_override("font_size", 19)
 	score_val.add_theme_color_override("font_color", Color(1.0, 0.92, 0.50))
 	score_hb.add_child(score_val)
 
 	var plus_btn := Button.new()
-	plus_btn.text = "+1점"
+	plus_btn.text = " +1 "
 	plus_btn.disabled = (selected_bid_score >= 20)
 	plus_btn.pressed.connect(func() -> void:
 		selected_bid_score = mini(20, selected_bid_score + 1)
@@ -911,7 +1022,7 @@ func _show_human_bidding_modal(gen: int) -> void:
 	modal_vbox.add_child(act_hb)
 
 	var bid_btn := Button.new()
-	bid_btn.text = "%s %d점 공약 선언" % [Rules.SUIT_NAMES[selected_bid_suit], selected_bid_score]
+	bid_btn.text = "📢 %s %d점 선언" % [Rules.SUIT_NAMES[selected_bid_suit], selected_bid_score]
 	bid_btn.disabled = (min_bid > 20)
 	_style_suit_button(bid_btn, selected_bid_suit, true)
 	bid_btn.pressed.connect(func() -> void:
@@ -920,8 +1031,8 @@ func _show_human_bidding_modal(gen: int) -> void:
 		highest_bid = selected_bid_score
 		highest_bid_suit = selected_bid_suit
 		declarer_idx = 0
-		_set_rich_text(player_bubble_labels[0], "선언: %s %d점" % [Rules.SUIT_NAMES[highest_bid_suit], highest_bid], "#A6FAC8", false)
-		_set_rich_text(log_label, "내가 [%s %d점] 공약을 선언했습니다!" % [Rules.SUIT_NAMES[highest_bid_suit], highest_bid], "#C7F2D9", true)
+		_set_rich_text(player_bubble_labels[0], "📢 %s %d" % [Rules.SUIT_NAMES[highest_bid_suit], highest_bid], "#A6FAC8", false)
+		_set_rich_text(log_label, "나 → [%s %d점] 선언" % [Rules.SUIT_NAMES[highest_bid_suit], highest_bid], "#C7F2D9", true)
 		current_bidder = 1
 		_process_bidding_turn(gen)
 	)
@@ -933,8 +1044,8 @@ func _show_human_bidding_modal(gen: int) -> void:
 		center_modal.visible = false
 		_play_sfx("pass")
 		passed_players[0] = true
-		_set_rich_text(player_bubble_labels[0], "패스 (Pass)", "#A6FAC8", false)
-		_set_rich_text(log_label, "내가 경매를 패스했습니다.", "#C7F2D9", true)
+		_set_rich_text(player_bubble_labels[0], "패스", "#A6FAC8", false)
+		_set_rich_text(log_label, "나 → 패스", "#C7F2D9", true)
 		current_bidder = 1
 		_process_bidding_turn(gen)
 	)
@@ -942,10 +1053,10 @@ func _show_human_bidding_modal(gen: int) -> void:
 
 	if Rules.is_deal_miss_eligible(hands[0], selected_bid_suit):
 		var dm_btn := Button.new()
-		dm_btn.text = "딜미스 선언 (재배분)"
+		dm_btn.text = "딜미스 재배분"
 		dm_btn.pressed.connect(func() -> void:
 			center_modal.visible = false
-			_set_rich_text(log_label, "딜미스를 선언하여 패를 다시 나눕니다!", "#C7F2D9", true)
+			_set_rich_text(log_label, "딜미스 선언 — 패를 다시 나눕니다!", "#C7F2D9", true)
 			start_new_round()
 		)
 		act_hb.add_child(dm_btn)
@@ -957,7 +1068,7 @@ func _start_kitty_phase(gen: int) -> void:
 	_play_sfx("contract")
 	for i in range(5):
 		_set_rich_text(player_bubble_labels[i], "")
-	_set_rich_text(player_bubble_labels[declarer_idx], "주공 당선! (%s %d점)" % [Rules.SUIT_NAMES[trump_suit], contract_score], "#A6FAC8", false)
+	_set_rich_text(player_bubble_labels[declarer_idx], "👑 %s %d" % [Rules.SUIT_NAMES[trump_suit], contract_score], "#A6FAC8", false)
 	_highlight_active_seat(declarer_idx)
 
 	hands[declarer_idx].append_array(kitty)
@@ -968,13 +1079,13 @@ func _start_kitty_phase(gen: int) -> void:
 		waiting_for_human = true
 		discard_selected_ids.clear()
 		selected_friend_option = 0
-		hand_hint_label.text = "바닥패 3장이 추가되었습니다! 아래 내 손패(13장)에서 버릴 카드 3장을 클릭해 선택하세요."
+		hand_hint_label.text = "내 손패(13장)에서 버릴 카드 3장을 클릭하세요"
 		_render_human_hand()
 		_show_human_kitty_modal(gen)
 	else:
 		waiting_for_human = false
 		center_modal.visible = false
-		_set_rich_text(trick_info_banner, "주공 %s님이 바닥패를 교환하고 프렌드를 지정하고 있습니다..." % PLAYER_NAMES[declarer_idx], "#FFE899", true)
+		_set_rich_text(trick_info_banner, "주공 %s 바닥패 교환 중..." % PLAYER_NAMES[declarer_idx], "#FFE899", true)
 		await get_tree().create_timer(1.0).timeout
 		if gen != round_generation:
 			return
@@ -987,7 +1098,11 @@ func _start_kitty_phase(gen: int) -> void:
 		friend_spec = prep["friend_spec"]
 		_resolve_card_friend_owner()
 		_play_sfx("contract")
-		_set_rich_text(log_label, "주공 %s님이 [%s]를 선언했습니다!" % [PLAYER_NAMES[declarer_idx], str(friend_spec["label"])], "#C7F2D9", true)
+		if friend_player_idx == 0:
+			_play_sfx("friend_reveal")
+			_set_rich_text(log_label, "주공 %s → [%s] 선언! (내가 프렌드여서 모든 진영 즉시 공개!)" % [PLAYER_NAMES[declarer_idx], str(friend_spec["label"])], "#FFE899", true)
+		else:
+			_set_rich_text(log_label, "주공 %s → [%s] 선언!" % [PLAYER_NAMES[declarer_idx], str(friend_spec["label"])], "#C7F2D9", true)
 		_start_trick_play_phase(gen)
 
 func _show_human_kitty_modal(gen: int) -> void:
@@ -996,25 +1111,85 @@ func _show_human_kitty_modal(gen: int) -> void:
 		child.queue_free()
 
 	var title := Label.new()
-	title.text = "★ 주공 당선! 바닥패 3장 버리기 & 프렌드 지정"
+	title.text = "👑 바닥패 교환 (3장) & 프렌드 지정"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 19)
+	title.add_theme_font_size_override("font_size", 18)
 	title.add_theme_color_override("font_color", Color(0.98, 0.84, 0.28))
 	modal_vbox.add_child(title)
 
-	var kitty_names: Array[String] = []
+	# 들어온 바닥패 3장 미니 카드 + 버릴 카드 3장 슬롯을 한 줄에 시각적으로 표시
+	var cards_row := HBoxContainer.new()
+	cards_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	cards_row.add_theme_constant_override("separation", 18)
+	modal_vbox.add_child(cards_row)
+
+	# 좌측: 들어온 바닥패 3장
+	var kitty_vb := VBoxContainer.new()
+	kitty_vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	kitty_vb.add_theme_constant_override("separation", 3)
+	cards_row.add_child(kitty_vb)
+
+	var k_lbl := Label.new()
+	k_lbl.text = "📥 들어온 바닥패"
+	k_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	k_lbl.add_theme_font_size_override("font_size", 12)
+	k_lbl.add_theme_color_override("font_color", Color(0.78, 0.94, 0.86))
+	kitty_vb.add_child(k_lbl)
+
+	var kitty_hb := HBoxContainer.new()
+	kitty_hb.add_theme_constant_override("separation", 6)
+	kitty_vb.add_child(kitty_hb)
 	for kc in kitty:
-		kitty_names.append(Rules.card_short_name(kc))
-	var kitty_lbl := _create_rich_label(14, 24.0)
-	_set_rich_text(kitty_lbl, "들어온 바닥패: %s  |  선택된 버릴 카드: %d / 3장" % [", ".join(kitty_names), discard_selected_ids.size()], "#D2F5E1", true)
-	modal_vbox.add_child(kitty_lbl)
+		var cv := Button.new()
+		cv.set_script(CardViewScript)
+		kitty_hb.add_child(cv)
+		cv.setup(kc, trump_suit, false, true)
+		cv.set_legal(false)
+
+	# 우측: 버릴 카드 3장 슬롯
+	var disc_vb := VBoxContainer.new()
+	disc_vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	disc_vb.add_theme_constant_override("separation", 3)
+	cards_row.add_child(disc_vb)
+
+	var d_lbl := Label.new()
+	d_lbl.text = "📤 버릴 카드 (%d/3)" % discard_selected_ids.size()
+	d_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	d_lbl.add_theme_font_size_override("font_size", 12)
+	d_lbl.add_theme_color_override("font_color", Color(1.0, 0.78, 0.72))
+	disc_vb.add_child(d_lbl)
+
+	var disc_hb := HBoxContainer.new()
+	disc_hb.add_theme_constant_override("separation", 6)
+	disc_vb.add_child(disc_hb)
+
+	for slot_i in range(3):
+		if slot_i < discard_selected_ids.size():
+			var cid := discard_selected_ids[slot_i]
+			var found_c: Dictionary = {}
+			for hc in hands[0]:
+				if str(hc["id"]) == cid:
+					found_c = hc
+					break
+			if not found_c.is_empty():
+				var cv := Button.new()
+				cv.set_script(CardViewScript)
+				disc_hb.add_child(cv)
+				cv.setup(found_c, trump_suit, false, true)
+				cv.set_legal(true)
+				cv.card_clicked.connect(_on_human_card_clicked)
+		else:
+			var empty_slot := PanelContainer.new()
+			empty_slot.custom_minimum_size = Vector2(40, 54)
+			empty_slot.add_theme_stylebox_override("panel", _make_panel_style(Color(0.06, 0.12, 0.10, 0.6), Color(0.45, 0.55, 0.50, 0.7), 5, 1))
+			disc_hb.add_child(empty_slot)
 
 	var m_card := Rules.get_mighty_card_template(trump_suit)
 	var friend_options := [
 		{"type": "card", "card_id": str(m_card["id"]), "suit": int(m_card["suit"]), "label": "마이티 (%s) 프렌드" % Rules.card_short_name(m_card)},
 		{"type": "card", "card_id": "joker", "suit": Rules.SUIT_JOKER, "label": "조커 ★ 프렌드"},
-		{"type": "first_trick", "card_id": "", "suit": Rules.SUIT_NONE, "label": "초구 프렌드 (1라운드 승자)"},
-		{"type": "none", "card_id": "", "suit": Rules.SUIT_NONE, "label": "노프렌드 (혼자서 승리 도전)"}
+		{"type": "first_trick", "card_id": "", "suit": Rules.SUIT_NONE, "label": "초구 프렌드 (1R 승자)"},
+		{"type": "none", "card_id": "", "suit": Rules.SUIT_NONE, "label": "노프렌드 (단독)"}
 	]
 	if trump_suit != Rules.SUIT_NONE:
 		var ta := {"id": "%d_14" % trump_suit, "suit": trump_suit, "rank": 14}
@@ -1023,11 +1198,6 @@ func _show_human_kitty_modal(gen: int) -> void:
 		friend_options.insert(3, {"type": "card", "card_id": str(tk["id"]), "suit": trump_suit, "label": "기루다 K (%s) 프렌드" % Rules.card_short_name(tk)})
 
 	selected_friend_option = clampi(selected_friend_option, 0, friend_options.size() - 1)
-
-	var f_lbl := Label.new()
-	f_lbl.text = "함께할 프렌드(여당) 지정:"
-	f_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	modal_vbox.add_child(f_lbl)
 
 	var f_grid := GridContainer.new()
 	f_grid.columns = 2
@@ -1050,7 +1220,7 @@ func _show_human_kitty_modal(gen: int) -> void:
 		f_grid.add_child(fb)
 
 	var confirm_btn := Button.new()
-	confirm_btn.text = "바닥패 3장 버리기 및 프렌드 선언 완료 (%d/3)" % discard_selected_ids.size()
+	confirm_btn.text = "✅ 교환 및 프렌드 선언 완료 (%d/3)" % discard_selected_ids.size()
 	confirm_btn.disabled = (discard_selected_ids.size() != 3)
 	confirm_btn.pressed.connect(func() -> void:
 		var new_hand: Array = []
@@ -1066,7 +1236,7 @@ func _show_human_kitty_modal(gen: int) -> void:
 		_resolve_card_friend_owner()
 		center_modal.visible = false
 		_play_sfx("contract")
-		_set_rich_text(log_label, "내가 [%s]를 선언하고 본 게임을 시작합니다!" % str(friend_spec["label"]), "#C7F2D9", true)
+		_set_rich_text(log_label, "나 → [%s] 선언!" % str(friend_spec["label"]), "#C7F2D9", true)
 		_start_trick_play_phase(gen)
 	)
 	modal_vbox.add_child(confirm_btn)
@@ -1120,12 +1290,12 @@ func _process_trick_turn(gen: int) -> void:
 	if turn_player == 0:
 		waiting_for_human = true
 		center_modal.visible = false
-		hand_hint_label.text = "내 차례입니다! 녹색 테두리로 표시된 낼 수 있는 카드를 클릭하세요."
+		hand_hint_label.text = "내 차례 — 녹색 테두리 카드를 클릭해 내세요"
 		_render_human_hand()
 	else:
 		waiting_for_human = false
 		center_modal.visible = false
-		hand_hint_label.text = "%s님이 카드를 내는 중입니다..." % PLAYER_NAMES[turn_player]
+		hand_hint_label.text = "%s 차례..." % PLAYER_NAMES[turn_player]
 		_render_human_hand()
 		await get_tree().create_timer(0.55).timeout
 		if gen != round_generation:
@@ -1177,7 +1347,7 @@ func _show_joker_suit_modal(gen: int, joker_card: Dictionary) -> void:
 		child.queue_free()
 
 	var t := _create_rich_label(18, 28.0)
-	_set_rich_text(t, "★조커 선공: 요청할 문양을 선택하세요", "#FFE899", true)
+	_set_rich_text(t, "★ 조커 선공 — 요청 문양 선택", "#FFE899", true)
 	modal_vbox.add_child(t)
 
 	var hb := HBoxContainer.new()
@@ -1185,15 +1355,21 @@ func _show_joker_suit_modal(gen: int, joker_card: Dictionary) -> void:
 	hb.add_theme_constant_override("separation", 10)
 	modal_vbox.add_child(hb)
 
+	var tile_titles := {
+		Rules.SUIT_SPADE: "스페이드",
+		Rules.SUIT_DIAMOND: "다이아",
+		Rules.SUIT_HEART: "하트",
+		Rules.SUIT_CLUB: "클로버"
+	}
 	for s in [Rules.SUIT_SPADE, Rules.SUIT_DIAMOND, Rules.SUIT_HEART, Rules.SUIT_CLUB]:
-		var b := Button.new()
-		b.text = str(Rules.SUIT_NAMES[s])
-		_style_suit_button(b, s, false)
-		b.pressed.connect(func() -> void:
+		var tile := Button.new()
+		tile.set_script(CardViewScript)
+		hb.add_child(tile)
+		tile.setup_suit_tile(s, str(tile_titles[s]), false)
+		tile.pressed.connect(func() -> void:
 			center_modal.visible = false
 			_execute_card_play(gen, 0, joker_card, false, s)
 		)
-		hb.add_child(b)
 
 func _show_joker_call_modal(gen: int, jc_card: Dictionary) -> void:
 	center_modal.visible = true
@@ -1201,7 +1377,7 @@ func _show_joker_call_modal(gen: int, jc_card: Dictionary) -> void:
 		child.queue_free()
 
 	var t := _create_rich_label(18, 28.0)
-	_set_rich_text(t, "▶ 조커 콜(%s) 카드를 내시겠습니까?" % Rules.card_short_name(jc_card), "#FFE899", true)
+	_set_rich_text(t, "▶ 조커 콜(%s) 선언 여부" % Rules.card_short_name(jc_card), "#FFE899", true)
 	modal_vbox.add_child(t)
 
 	var hb := HBoxContainer.new()
@@ -1210,7 +1386,7 @@ func _show_joker_call_modal(gen: int, jc_card: Dictionary) -> void:
 	modal_vbox.add_child(hb)
 
 	var call_btn := Button.new()
-	call_btn.text = "조커 콜 선언하고 내기!"
+	call_btn.text = "📢 조커 콜 선언!"
 	call_btn.pressed.connect(func() -> void:
 		center_modal.visible = false
 		_execute_card_play(gen, 0, jc_card, true, int(jc_card["suit"]))
@@ -1218,7 +1394,7 @@ func _show_joker_call_modal(gen: int, jc_card: Dictionary) -> void:
 	hb.add_child(call_btn)
 
 	var normal_btn := Button.new()
-	normal_btn.text = "조커 콜 없이 일반 카드로 내기"
+	normal_btn.text = "일반 카드로 내기"
 	normal_btn.pressed.connect(func() -> void:
 		center_modal.visible = false
 		_execute_card_play(gen, 0, jc_card, false, int(jc_card["suit"]))
@@ -1240,15 +1416,15 @@ func _execute_card_play(gen: int, player_idx: int, card: Dictionary, declare_jok
 			var ls: int = joker_req_suit if (trick_number > 1 and trick_number < 10) else Rules.SUIT_NONE
 			lead_info["lead_suit"] = ls
 			lead_info["joker_call_active"] = false
-			lead_info["note"] = "★조커 선공 (요청 문양: %s)" % str(Rules.SUIT_NAMES[ls])
+			lead_info["note"] = "★조커 요청: %s" % str(Rules.SUIT_NAMES[ls])
 		elif declare_joker_call and Rules.is_joker_call(card, trump_suit):
 			lead_info["lead_suit"] = int(card["suit"])
 			lead_info["joker_call_active"] = true
-			lead_info["note"] = "▶ 조커 콜 발동! (%s)" % Rules.card_short_name(card)
+			lead_info["note"] = "▶조커콜 (%s)" % Rules.card_short_name(card)
 		else:
 			lead_info["lead_suit"] = int(card["suit"])
 			lead_info["joker_call_active"] = false
-			lead_info["note"] = "선문양: %s" % str(Rules.SUIT_NAMES[int(card["suit"])])
+			lead_info["note"] = "선공: %s" % str(Rules.SUIT_NAMES[int(card["suit"])])
 
 	if Rules.is_mighty(card, trump_suit) or Rules.is_joker(card) or (declare_joker_call and Rules.is_joker_call(card, trump_suit)):
 		_play_sfx("special_card")
@@ -1273,7 +1449,7 @@ func _execute_card_play(gen: int, player_idx: int, card: Dictionary, declare_jok
 			friend_player_idx = player_idx
 			friend_revealed = true
 			_play_sfx("friend_reveal")
-			_set_rich_text(log_label, "[프렌드 공개] %s님이 프렌드 카드(%s)를 내어 여당임이 밝혀졌습니다!" % [
+			_set_rich_text(log_label, "★프렌드 공개 → %s (%s)" % [
 				PLAYER_NAMES[player_idx],
 				Rules.card_short_name(card)
 			], "#C7F2D9", true)
@@ -1295,7 +1471,7 @@ func _finish_trick(gen: int) -> void:
 		friend_revealed = true
 		_render_all_trick_slots()
 		_play_sfx("friend_reveal")
-		_set_rich_text(log_label, "[프렌드 공개] 초구 승리자 %s님이 프렌드(여당)가 되었습니다!" % PLAYER_NAMES[winner_idx], "#C7F2D9", true)
+		_set_rich_text(log_label, "★초구 프렌드 확정 → %s" % PLAYER_NAMES[winner_idx], "#C7F2D9", true)
 
 	var pts_won := 0
 	for p in trick_plays:
@@ -1305,7 +1481,7 @@ func _finish_trick(gen: int) -> void:
 			pts_won += 1
 
 	_play_sfx("trick_win")
-	_set_rich_text(trick_info_banner, "%d라운드 승자: %s (%s) — 점수 +%d점 획득!" % [
+	_set_rich_text(trick_info_banner, "🏆 R%d 승: %s (%s)  +%d점" % [
 		trick_number,
 		PLAYER_NAMES[winner_idx],
 		Rules.card_short_name(win_card),
@@ -1380,15 +1556,15 @@ func _show_round_result_modal(ruling_won: bool, ruling_pts: int, def_pts: int, s
 		child.queue_free()
 
 	var title := Label.new()
-	title.text = "★ 여당(주공+프렌드) 공약 달성 승리!" if ruling_won else "◆ 야당(수비팀) 공약 저지 승리!"
+	title.text = "🏆 ★여당 공약 달성 승리!" if ruling_won else "🛡 ◆야당 공약 저지 승리!"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 21)
 	title.add_theme_color_override("font_color", COLOR_RULING_MAIN if ruling_won else COLOR_OPPOSITION)
 	modal_vbox.add_child(title)
 
-	var summary := _create_rich_label(14, 48.0)
-	var f_name: String = PLAYER_NAMES[friend_player_idx] if friend_player_idx != -1 else "없음(노프렌드)"
-	_set_rich_text(summary, "주공: %s | 프렌드: %s (%s)\n공약: %s %d점  →  ★여당 획득: %d점 / ◆야당 획득: %d점" % [
+	var summary := _create_rich_label(14, 44.0)
+	var f_name: String = PLAYER_NAMES[friend_player_idx] if friend_player_idx != -1 else "노프렌드"
+	_set_rich_text(summary, "👑주공: %s  |  🤝프렌드: %s (%s)\n공약 [%s %d점]  →  ★여당 %d점  vs  ◆야당 %d점" % [
 		PLAYER_NAMES[declarer_idx],
 		f_name,
 		str(friend_spec["label"]),
@@ -1414,22 +1590,22 @@ func _show_round_result_modal(ruling_won: bool, ruling_pts: int, def_pts: int, s
 		var role_tag := "◆ 야당"
 		var r_col := COLOR_OPPOSITION
 		if i == declarer_idx:
-			role_tag = "★ 여당(주공)"
+			role_tag = "★ 여당[주공]"
 			r_col = COLOR_RULING_MAIN
 		elif i == friend_player_idx:
-			role_tag = "★ 여당(프렌드)"
+			role_tag = "★ 여당[프렌드]"
 			r_col = COLOR_RULING_FRIEND
-		r_lbl.text = "[%s]" % role_tag
+		r_lbl.text = role_tag
 		r_lbl.add_theme_color_override("font_color", r_col)
 		row_hb.add_child(r_lbl)
 
 		var sc_lbl := Label.new()
 		var diff_str := "+%d" % score_changes[i] if score_changes[i] >= 0 else str(score_changes[i])
-		sc_lbl.text = ": 이번 판 %s점  (누적 %d점)" % [diff_str, total_scores[i]]
+		sc_lbl.text = " %s점 (누적 %d)" % [diff_str, total_scores[i]]
 		row_hb.add_child(sc_lbl)
 
 	var next_btn := Button.new()
-	next_btn.text = "다음 판 시작하기"
+	next_btn.text = "▶ 다음 판 시작"
 	next_btn.pressed.connect(func() -> void:
 		center_modal.visible = false
 		start_new_round()
@@ -1453,6 +1629,7 @@ func _render_trick_slot(slot_idx: int, player_idx: int, card: Dictionary) -> voi
 	for c in slot.get_children():
 		c.queue_free()
 
+	var known_f := _is_friend_known_on_screen()
 	var role_txt := "? 미상"
 	var role_col := COLOR_UNKNOWN_ROLE
 	var tag_bg := Color(0.07, 0.16, 0.12, 0.92)
@@ -1464,13 +1641,13 @@ func _render_trick_slot(slot_idx: int, player_idx: int, card: Dictionary) -> voi
 		tag_bg = Color(0.26, 0.16, 0.05, 0.96)
 		tag_border = COLOR_RULING_MAIN
 		tag_bw = 2
-	elif friend_revealed and player_idx == friend_player_idx:
+	elif known_f and player_idx == friend_player_idx:
 		role_txt = "★ 여당[프렌드]"
 		role_col = COLOR_RULING_FRIEND
 		tag_bg = Color(0.24, 0.14, 0.06, 0.96)
 		tag_border = COLOR_RULING_FRIEND
 		tag_bw = 2
-	elif friend_revealed:
+	elif known_f:
 		role_txt = "◆ 야당"
 		role_col = COLOR_OPPOSITION
 		tag_bg = Color(0.05, 0.14, 0.23, 0.92)
@@ -1511,6 +1688,7 @@ func _highlight_active_seat(active_idx: int) -> void:
 	_update_seat_styles()
 
 func _update_seat_styles() -> void:
+	var known_f := _is_friend_known_on_screen()
 	for i in range(5):
 		var bg_col := Color(0.07, 0.16, 0.12, 0.92)
 		var border_col := Color(0.28, 0.52, 0.38)
@@ -1518,10 +1696,10 @@ func _update_seat_styles() -> void:
 			if i == declarer_idx:
 				bg_col = Color(0.24, 0.15, 0.05, 0.94)
 				border_col = COLOR_RULING_MAIN
-			elif friend_revealed and i == friend_player_idx:
+			elif known_f and i == friend_player_idx:
 				bg_col = Color(0.22, 0.13, 0.06, 0.94)
 				border_col = COLOR_RULING_FRIEND
-			elif friend_revealed:
+			elif known_f:
 				bg_col = Color(0.05, 0.14, 0.23, 0.94)
 				border_col = COLOR_OPPOSITION
 
@@ -1542,12 +1720,16 @@ func _render_captured_solitaire(player_idx: int) -> void:
 
 	var cards: Array = captured_points[player_idx]
 	if cards.is_empty():
-		var empty_lbl := Label.new()
-		empty_lbl.text = "획득 점수패 없음"
-		empty_lbl.position = Vector2(2, 16)
-		empty_lbl.add_theme_font_size_override("font_size", 11)
-		empty_lbl.add_theme_color_override("font_color", Color(0.58, 0.68, 0.62))
-		box.add_child(empty_lbl)
+		# 텍스트 대신 빈 미니 카드 슬롯 윤곽선 3개를 은은하게 그림
+		var placeholder := Control.new()
+		placeholder.custom_minimum_size = Vector2(220, 54)
+		placeholder.draw.connect(func() -> void:
+			for k in range(3):
+				var r := Rect2(Vector2(2.0 + float(k) * 24.0, 2.0), Vector2(38, 50))
+				placeholder.draw_rect(r, Color(0.06, 0.13, 0.10, 0.38), true)
+				placeholder.draw_rect(r, Color(0.32, 0.48, 0.40, 0.35), false, 1.0)
+		)
+		box.add_child(placeholder)
 		return
 
 	var count := cards.size()
@@ -1569,68 +1751,48 @@ func _render_captured_solitaire(player_idx: int) -> void:
 func _refresh_all_ui() -> void:
 	match phase:
 		Phase.BIDDING:
-			top_status_label.text = "[경매 단계]"
+			top_status_label.text = "[경매]"
 		Phase.KITTY_EXCHANGE:
-			top_status_label.text = "[바닥패 교환 & 프렌드 선언]"
+			top_status_label.text = "[바닥패·프렌드]"
 		Phase.PLAYING:
-			top_status_label.text = "[%d / 10 라운드]" % trick_number
+			top_status_label.text = "[R%d / 10]" % trick_number
 			var note_str: String = str(lead_info.get("note", ""))
-			_set_rich_text(trick_info_banner, "%d라운드 진행 중 %s" % [
+			_set_rich_text(trick_info_banner, "R%d %s" % [
 				trick_number,
-				("— " + note_str) if not note_str.is_empty() else ""
+				("— " + note_str) if not note_str.is_empty() else "진행 중"
 			], "#FFE899", true)
 		Phase.ROUND_OVER:
-			top_status_label.text = "[라운드 종료]"
+			top_status_label.text = "[종료]"
 
 	if played_cards_btn != null:
-		played_cards_btn.text = "나온 카드 보기 (%d장)" % played_cards_history.size()
+		played_cards_btn.text = "🃏 기록(%d)" % played_cards_history.size()
 
-	if declarer_idx == -1:
-		_set_rich_text(contract_info_label, "공약: 경매 중 | 주공: 미정 | 프렌드: 미정", "#FFF2C6", false)
-	else:
-		var f_status: String = str(friend_spec["label"])
-		if friend_revealed and friend_player_idx != -1:
-			f_status += " (%s)" % PLAYER_NAMES[friend_player_idx]
-		elif phase == Phase.PLAYING and str(friend_spec["type"]) != "none":
-			f_status += " (정체 숨김)"
-		_set_rich_text(contract_info_label, "공약: %s %d점 | ★주공: %s | ★프렌드: %s" % [
-			str(Rules.SUIT_NAMES[trump_suit]),
-			contract_score,
-			PLAYER_NAMES[declarer_idx],
-			f_status
-		], "#FFF2C6", false)
+	_refresh_hud_contract_box()
+	if hud_score_gauge != null:
+		hud_score_gauge.queue_redraw()
 
-	var known_ruling := 0
-	var known_def := 0
+	var known_f := _is_friend_known_on_screen()
 	for i in range(5):
-		var pts := Rules.count_point_cards(captured_points[i])
-		if i == declarer_idx or (friend_revealed and i == friend_player_idx):
-			known_ruling += pts
-		else:
-			known_def += pts
-	team_score_label.text = "★여당(공개): %d/%d점 | ◆야당/기타: %d점" % [known_ruling, contract_score, known_def]
-
-	for i in range(5):
-		var role_txt := "경매 중"
+		var role_txt := "경매"
 		var role_col := COLOR_UNKNOWN_ROLE
 		if declarer_idx != -1:
 			if i == declarer_idx:
-				role_txt = "★ 여당 [주공]"
+				role_txt = "★ 여당[주공]"
 				role_col = COLOR_RULING_MAIN
-			elif friend_revealed and i == friend_player_idx:
-				role_txt = "★ 여당 [프렌드]"
+			elif known_f and i == friend_player_idx:
+				role_txt = "★ 여당[프렌드]"
 				role_col = COLOR_RULING_FRIEND
-			elif friend_revealed:
-				role_txt = "◆ 야당 [수비]"
+			elif known_f:
+				role_txt = "◆ 야당[수비]"
 				role_col = COLOR_OPPOSITION
 			else:
-				role_txt = "? [정체 미상]"
+				role_txt = "? 미상"
 				role_col = COLOR_UNKNOWN_ROLE
 		player_role_labels[i].text = role_txt
 		player_role_labels[i].add_theme_color_override("font_color", role_col)
 
-		var pts_i := Rules.count_point_cards(captured_points[i])
-		player_card_count_labels[i].text = "남은 패: %d장 | 획득: %d점 | 누적: %d점" % [hands[i].size(), pts_i, total_scores[i]]
+		if i < player_stat_bars.size():
+			player_stat_bars[i].queue_redraw()
 		_render_captured_solitaire(i)
 
 	_update_seat_styles()
@@ -1647,12 +1809,17 @@ func _render_human_hand() -> void:
 		for c in hands[0]:
 			legal_ids.append(str(c["id"]))
 
+	var friend_cid := str(friend_spec.get("card_id", "")) if str(friend_spec.get("type", "")) == "card" else ""
+
 	for card in hands[0]:
 		var cv := Button.new()
 		cv.set_script(CardViewScript)
 		hand_container.add_child(cv)
 		var display_trump := trump_suit if declarer_idx != -1 else selected_bid_suit
 		cv.setup(card, display_trump, false, false)
+
+		if not friend_cid.is_empty() and str(card["id"]) == friend_cid and declarer_idx != 0:
+			cv.set_friend_card(true)
 
 		if phase == Phase.KITTY_EXCHANGE and declarer_idx == 0:
 			cv.set_legal(true, false)

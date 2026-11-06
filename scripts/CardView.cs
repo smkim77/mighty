@@ -12,11 +12,16 @@ public partial class CardView : Button
     private bool _isSelectedForDiscard;
     private bool _isLegalPlay;
     private bool _isDimmed;
+    private bool _isFriendCard;
     private bool _compactMode;
     private bool _miniMode;
+    private bool _suitTileMode;
+    private Suit _tileSuit = Suit.Spade;
+    private bool _tileSelected;
 
     public void Setup(CardData data, Suit trumpSuit = Suit.None, bool compact = false, bool mini = false)
     {
+        _suitTileMode = false;
         _cardData = data;
         _trumpSuit = trumpSuit;
         _compactMode = compact;
@@ -40,6 +45,21 @@ public partial class CardView : Button
         QueueRedraw();
     }
 
+    public void SetupSuitTile(Suit suit, string title = "", bool selected = false)
+    {
+        _suitTileMode = true;
+        _tileSuit = suit;
+        _tileSelected = selected;
+        CustomMinimumSize = new Vector2(68, 82);
+        Size = new Vector2(68, 82);
+        Flat = true;
+        Disabled = false;
+        MouseDefaultCursorShape = CursorShape.PointingHand;
+        MouseEntered += QueueRedraw;
+        MouseExited += QueueRedraw;
+        QueueRedraw();
+    }
+
     public void SetLegal(bool legal, bool dimWhenIllegal = false)
     {
         _isLegalPlay = legal;
@@ -55,9 +75,15 @@ public partial class CardView : Button
         QueueRedraw();
     }
 
+    public void SetFriendCard(bool val)
+    {
+        _isFriendCard = val;
+        QueueRedraw();
+    }
+
     private void OnButtonPressed()
     {
-        if (_isLegalPlay && _cardData != null)
+        if (_isLegalPlay && !_suitTileMode && _cardData != null)
             CardClicked?.Invoke(_cardData);
     }
 
@@ -75,10 +101,56 @@ public partial class CardView : Button
 
     public override void _Draw()
     {
-        if (_cardData == null) return;
-
+        Font font = ThemeDB.FallbackFont;
         float w = Size.X;
         float h = Size.Y;
+
+        if (_suitTileMode)
+        {
+            float yOff = (IsHovered() || _tileSelected) ? -4.0f : 0.0f;
+            var tRect = new Rect2(new Vector2(0, yOff), new Vector2(w, h));
+            DrawRect(new Rect2(tRect.Position + new Vector2(2, 3), tRect.Size), new Color(0, 0, 0, 0.38f), true);
+            var tBg = _tileSelected ? new Color(1.0f, 0.95f, 0.78f) : new Color(0.99f, 0.985f, 0.96f);
+            DrawRect(tRect, tBg, true);
+            var tBorder = _tileSelected ? new Color(0.14f, 0.78f, 0.40f) : new Color(0.26f, 0.30f, 0.34f);
+            float tBw = _tileSelected ? 3.2f : 2.0f;
+            DrawRect(tRect, tBorder, false, tBw);
+
+            var sCol = new Color(0.10f, 0.12f, 0.16f);
+            if (MightyRules.IsRedSuit(_tileSuit))
+                sCol = new Color(0.82f, 0.14f, 0.18f);
+            else if (_tileSuit == Suit.None)
+                sCol = new Color(0.14f, 0.46f, 0.32f);
+
+            if (_tileSuit == Suit.Diamond)
+            {
+                DrawDiamond(tRect.Position + new Vector2(w * 0.5f, h * 0.42f), 11.5f, 15.5f, sCol);
+            }
+            else if (_tileSuit == Suit.None)
+            {
+                DrawCircle(tRect.Position + new Vector2(w * 0.5f, h * 0.42f), 13.0f, new Color(0.14f, 0.46f, 0.32f, 0.18f));
+                DrawString(font, tRect.Position + new Vector2(0, h * 0.49f), "NO", HorizontalAlignment.Center, w, 18, sCol);
+            }
+            else
+            {
+                string sym = MightyRules.GetSuitSymbol(_tileSuit);
+                DrawString(font, tRect.Position + new Vector2(0, h * 0.54f), sym, HorizontalAlignment.Center, w, 32, sCol);
+            }
+
+            string shortLbl = _tileSuit switch
+            {
+                Suit.Spade => "스페이드",
+                Suit.Diamond => "다이아",
+                Suit.Heart => "하트",
+                Suit.Club => "클로버",
+                _ => "노기루"
+            };
+            DrawString(font, tRect.Position + new Vector2(0, h - 10), shortLbl, HorizontalAlignment.Center, w, 12, sCol);
+            return;
+        }
+
+        if (_cardData == null) return;
+
         float yOffset = (!_miniMode && ((IsHovered() && _isLegalPlay) || _isSelectedForDiscard)) ? -10.0f : 0.0f;
         var rect = new Rect2(new Vector2(0, yOffset), new Vector2(w, h));
 
@@ -108,7 +180,6 @@ public partial class CardView : Button
 
         DrawRect(rect, borderCol, false, borderW);
 
-        Font font = ThemeDB.FallbackFont;
         var textCol = new Color(0.10f, 0.12f, 0.16f);
         if (MightyRules.IsRedSuit(_cardData.Suit))
             textCol = new Color(0.82f, 0.14f, 0.18f);
@@ -147,7 +218,7 @@ public partial class CardView : Button
         if (_cardData.Suit == Suit.Joker)
         {
             DrawString(font, rect.Position + new Vector2(8, 22), "JOKER", HorizontalAlignment.Left, -1, 13, textCol);
-            DrawString(font, rect.Position + new Vector2(0, h * 0.56f), "★", HorizontalAlignment.Center, w, _compactMode ? 22 : 30, textCol);
+            DrawString(font, rect.Position + new Vector2(0, h * 0.56f), "★", HorizontalAlignment.Center, w, 30, textCol);
             DrawString(font, rect.Position + new Vector2(0, h - 10), "조커", HorizontalAlignment.Center, w, 13, textCol);
         }
         else
@@ -180,9 +251,16 @@ public partial class CardView : Button
             DrawString(font, badgeRect.Position + new Vector2(0, 13), "기루", HorizontalAlignment.Center, 23, 10, Colors.White);
         }
 
+        if (_isFriendCard)
+        {
+            var fRect = new Rect2(rect.Position + new Vector2(w - 30, 25), new Vector2(25, 16));
+            DrawRect(fRect, new Color(0.95f, 0.52f, 0.14f), true);
+            DrawString(font, fRect.Position + new Vector2(0, 12), "프렌", HorizontalAlignment.Center, 25, 10, Colors.White);
+        }
+
         if (MightyRules.IsPointCard(_cardData))
         {
-            DrawString(font, rect.Position + new Vector2(6, h - 8), "★1점", HorizontalAlignment.Left, -1, 11, new Color(0.72f, 0.48f, 0.04f));
+            DrawString(font, rect.Position + new Vector2(6, h - 8), "★1", HorizontalAlignment.Left, -1, 11, new Color(0.72f, 0.48f, 0.04f));
         }
     }
 }

@@ -9,10 +9,16 @@ var trump_suit: int = Rules.SUIT_NONE
 var is_selected_for_discard: bool = false
 var is_legal_play: bool = false
 var is_dimmed: bool = false
+var is_friend_card: bool = false
 var compact_mode: bool = false
 var mini_mode: bool = false
+var suit_tile_mode: bool = false
+var tile_suit: int = Rules.SUIT_SPADE
+var tile_title: String = ""
+var tile_selected: bool = false
 
 func setup(data: Dictionary, p_trump_suit: int = Rules.SUIT_NONE, p_compact: bool = false, p_mini: bool = false) -> void:
+	suit_tile_mode = false
 	card_data = data
 	trump_suit = p_trump_suit
 	compact_mode = p_compact
@@ -27,9 +33,28 @@ func setup(data: Dictionary, p_trump_suit: int = Rules.SUIT_NONE, p_compact: boo
 	flat = true
 	disabled = true
 	mouse_default_cursor_shape = Control.CURSOR_ARROW
-	pressed.connect(_on_pressed)
-	mouse_entered.connect(func() -> void: queue_redraw())
-	mouse_exited.connect(func() -> void: queue_redraw())
+	if not pressed.is_connected(_on_pressed):
+		pressed.connect(_on_pressed)
+	if not mouse_entered.is_connected(queue_redraw):
+		mouse_entered.connect(queue_redraw)
+	if not mouse_exited.is_connected(queue_redraw):
+		mouse_exited.connect(queue_redraw)
+	queue_redraw()
+
+func setup_suit_tile(p_suit: int, p_title: String = "", p_selected: bool = false) -> void:
+	suit_tile_mode = true
+	tile_suit = p_suit
+	tile_title = p_title
+	tile_selected = p_selected
+	custom_minimum_size = Vector2(68, 82)
+	size = Vector2(68, 82)
+	flat = true
+	disabled = false
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	if not mouse_entered.is_connected(queue_redraw):
+		mouse_entered.connect(queue_redraw)
+	if not mouse_exited.is_connected(queue_redraw):
+		mouse_exited.connect(queue_redraw)
 	queue_redraw()
 
 func set_legal(legal: bool, dim_when_illegal: bool = false) -> void:
@@ -43,8 +68,12 @@ func set_discard_selected(sel: bool) -> void:
 	is_selected_for_discard = sel
 	queue_redraw()
 
+func set_friend_card(val: bool) -> void:
+	is_friend_card = val
+	queue_redraw()
+
 func _on_pressed() -> void:
-	if is_legal_play:
+	if is_legal_play and not suit_tile_mode:
 		card_clicked.emit(card_data)
 
 func _draw_diamond(center: Vector2, rx: float, ry: float, col: Color) -> void:
@@ -57,11 +86,49 @@ func _draw_diamond(center: Vector2, rx: float, ry: float, col: Color) -> void:
 	draw_colored_polygon(pts, col)
 
 func _draw() -> void:
+	var font: Font = get_theme_default_font()
+	var w := size.x
+	var h := size.y
+
+	if suit_tile_mode:
+		var y_off := -4.0 if (is_hovered() or tile_selected) else 0.0
+		var t_rect := Rect2(Vector2(0, y_off), Vector2(w, h))
+		draw_rect(Rect2(t_rect.position + Vector2(2, 3), t_rect.size), Color(0, 0, 0, 0.38), true)
+		var t_bg := Color(1.0, 0.95, 0.78) if tile_selected else Color(0.99, 0.985, 0.96)
+		draw_rect(t_rect, t_bg, true)
+		var t_border := Color(0.14, 0.78, 0.40) if tile_selected else Color(0.26, 0.30, 0.34)
+		var t_bw := 3.2 if tile_selected else 2.0
+		draw_rect(t_rect, t_border, false, t_bw)
+
+		var s_col := Color(0.10, 0.12, 0.16)
+		if Rules.is_red_suit(tile_suit):
+			s_col = Color(0.82, 0.14, 0.18)
+		elif tile_suit == Rules.SUIT_NONE:
+			s_col = Color(0.14, 0.46, 0.32)
+
+		if tile_suit == Rules.SUIT_DIAMOND:
+			_draw_diamond(t_rect.position + Vector2(w * 0.5, h * 0.42), 11.5, 15.5, s_col)
+		elif tile_suit == Rules.SUIT_NONE:
+			draw_circle(t_rect.position + Vector2(w * 0.5, h * 0.42), 13.0, Color(0.14, 0.46, 0.32, 0.18))
+			draw_string(font, t_rect.position + Vector2(0, h * 0.49), "NO", HORIZONTAL_ALIGNMENT_CENTER, w, 18, s_col)
+		else:
+			var sym: String = str(Rules.SUIT_SYMBOLS[tile_suit])
+			draw_string(font, t_rect.position + Vector2(0, h * 0.54), sym, HORIZONTAL_ALIGNMENT_CENTER, w, 32, s_col)
+
+		var lbl_map := {
+			Rules.SUIT_SPADE: "스페이드",
+			Rules.SUIT_DIAMOND: "다이아",
+			Rules.SUIT_HEART: "하트",
+			Rules.SUIT_CLUB: "클로버",
+			Rules.SUIT_NONE: "노기루"
+		}
+		var lbl_txt := tile_title if not tile_title.is_empty() else str(lbl_map.get(tile_suit, ""))
+		draw_string(font, t_rect.position + Vector2(0, h - 10), lbl_txt, HORIZONTAL_ALIGNMENT_CENTER, w, 12, s_col)
+		return
+
 	if card_data.is_empty():
 		return
 
-	var w := size.x
-	var h := size.y
 	var y_offset := 0.0
 	if not mini_mode and ((is_hovered() and is_legal_play) or is_selected_for_discard):
 		y_offset = -10.0
@@ -89,7 +156,6 @@ func _draw() -> void:
 
 	draw_rect(rect, border_col, false, border_w)
 
-	var font: Font = get_theme_default_font()
 	var suit: int = int(card_data["suit"])
 	var rank: int = int(card_data["rank"])
 
@@ -142,5 +208,10 @@ func _draw() -> void:
 		draw_rect(badge_rect, Color(0.14, 0.62, 0.36), true)
 		draw_string(font, badge_rect.position + Vector2(0, 13), "기루", HORIZONTAL_ALIGNMENT_CENTER, 23, 10, Color.WHITE)
 
+	if is_friend_card:
+		var f_rect := Rect2(rect.position + Vector2(w - 30, 25), Vector2(25, 16))
+		draw_rect(f_rect, Color(0.95, 0.52, 0.14), true)
+		draw_string(font, f_rect.position + Vector2(0, 12), "프렌", HORIZONTAL_ALIGNMENT_CENTER, 25, 10, Color.WHITE)
+
 	if Rules.is_point_card(card_data):
-		draw_string(font, rect.position + Vector2(6, h - 8), "★1점", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.48, 0.04))
+		draw_string(font, rect.position + Vector2(6, h - 8), "★1", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.48, 0.04))
